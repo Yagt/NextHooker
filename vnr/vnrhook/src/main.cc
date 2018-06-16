@@ -32,6 +32,24 @@
 DWORD processStartAddress,
       processStopAddress;
 
+namespace { // unnamed
+wchar_t processName[MAX_PATH];
+
+inline void GetProcessName(wchar_t *name)
+{
+  //assert(name);
+  PLDR_DATA_TABLE_ENTRY it;
+  __asm
+  {
+    mov eax,fs:[0x30]
+    mov eax,[eax+0xc]
+    mov eax,[eax+0xc]
+    mov it,eax
+  }
+  wcscpy(name, it->BaseDllName.Buffer);
+}
+} // unmaed namespace
+
 enum { HOOK_BUFFER_SIZE = MAX_HOOK * sizeof(TextHook) };
 //#define MAX_HOOK (HOOK_BUFFER_SIZE/sizeof(TextHook))
 DWORD hook_buff_len = HOOK_BUFFER_SIZE;
@@ -50,7 +68,6 @@ HANDLE
     hFile,
     hMutex,
     hmMutex;
-HMODULE currentModule;
 //DWORD current_process_id;
 extern DWORD enter_count;
 //extern LPWSTR current_dir;
@@ -138,25 +155,44 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD fdwReason, LPVOID unused)
 
       DisableThreadLibraryCalls(hModule);
 
-      swprintf(hm_section, ITH_SECTION_ L"%d", GetCurrentProcessId());
+      //if (!IthInitSystemService()) {
+      //  GROWL_WARN(L"Initialization failed.\nAre you running game on a network drive?");
+      //  return FALSE;
+      //}
+      // No longer checking if SystemService fails, which could happen on non-Japanese OS
+      IthInitSystemService();
+
+      swprintf(hm_section, ITH_SECTION_ L"%d", current_process_id);
 
       // jichi 9/25/2013: Interprocedural communication with vnrsrv.
-	  hSection = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE, 0, HOOK_SECTION_SIZE, hm_section);
-      ::hookman = (TextHook*)MapViewOfFile(hSection, FILE_MAP_ALL_ACCESS, 0, 0, HOOK_SECTION_SIZE / 2);
+      hSection = IthCreateSection(hm_section, HOOK_SECTION_SIZE, PAGE_EXECUTE_READWRITE);
+      ::hookman = nullptr;
+      NtMapViewOfSection(hSection, NtCurrentProcess(),
+          (LPVOID *)&::hookman, 0, hook_buff_len, 0, &hook_buff_len, ViewUnmap, 0,
+          PAGE_EXECUTE_READWRITE);
+          //PAGE_EXECUTE_READWRITE);
 
-	  ::processStartAddress = (DWORD)GetModuleHandleW(nullptr);
+	  GetProcessName(::processName);
+	  FillRange(::processName, &::processStartAddress, &::processStopAddress);
+      //NtInspect::getProcessMemoryRange(&::processStartAddress, &::processStopAddress);
+
+      //if (!::hookman) {
+      //  ith_has_section = false;
+      //  ::hookman = new TextHook[MAX_HOOK];
+      //  memset(::hookman, 0, MAX_HOOK * sizeof(TextHook));
+      //}
 
       {
         wchar_t hm_mutex[0x100];
-        swprintf(hm_mutex, ITH_HOOKMAN_MUTEX_ L"%d", GetCurrentProcessId());
-		::hmMutex = CreateMutexW(nullptr, FALSE, hm_mutex);
+        swprintf(hm_mutex, ITH_HOOKMAN_MUTEX_ L"%d", current_process_id);
+        ::hmMutex = IthCreateMutex(hm_mutex, FALSE);
       }
       {
         wchar_t dll_mutex[0x100];
-        swprintf(dll_mutex, ITH_PROCESS_MUTEX_ L"%d", GetCurrentProcessId());
+        swprintf(dll_mutex, ITH_PROCESS_MUTEX_ L"%d", current_process_id);
         DWORD exists;
-		::hMutex = CreateMutexW(nullptr, TRUE, dll_mutex); // jichi 9/18/2013: own is true, make sure the injected dll is singleton
-        if (GetLastError() == ERROR_ALREADY_EXISTS)
+        ::hMutex = IthCreateMutex(dll_mutex, TRUE, &exists); // jichi 9/18/2013: own is true, make sure the injected dll is singleton
+        if (exists)
           return FALSE;
       }
 
@@ -165,9 +201,8 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD fdwReason, LPVOID unused)
       ::tree = new AVLTree<char, FunctionInfo, SCMP, SCPY, SLEN>;
       AddAllModules();
       InitFilterTable();
-	  ::currentModule = hModule;
 
-      pipeThread = CreateRemoteThread(GetCurrentProcess(), nullptr, 0, PipeManager, 0, 0, nullptr);
+      pipeThread = IthCreateThread(PipeManager, 0);
     } break;
   case DLL_PROCESS_DETACH:
     {
@@ -181,28 +216,32 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD fdwReason, LPVOID unused)
       ::running = false;
       ::live = false;
 
+      const LONGLONG timeout = -50000000; // in nanoseconds = 5 seconds
+
       Engine::terminate();
 
       if (pipeThread) {
-		  WaitForSingleObject(pipeThread, TIMEOUT);
-        CloseHandle(pipeThread);
+        NtWaitForSingleObject(pipeThread, 0, (PLARGE_INTEGER)&timeout);
+        NtClose(pipeThread);
       }
 
       for (TextHook *man = ::hookman; man->RemoveHook(); man++);
       //LARGE_INTEGER lint = {-10000, -1};
       while (::enter_count)
-        Sleep(1); // jichi 9/28/2013: sleep for 1 ms
+        IthSleep(1); // jichi 9/28/2013: sleep for 1 ms
         //NtDelayExecution(0, &lint);
       for (TextHook *man = ::hookman; man < ::hookman + MAX_HOOK; man++)
         man->ClearHook();
       //if (ith_has_section)
-	  UnmapViewOfFile(::hookman);
-
-      CloseHandle(hSection);
-      CloseHandle(hMutex);
+      NtUnmapViewOfSection(NtCurrentProcess(), ::hookman);
+      //else
+      //  delete[] ::hookman;
+      NtClose(hSection);
+      NtClose(hMutex);
 
       delete ::tree;
-      CloseHandle(hmMutex);
+      IthCloseSystemService();
+      NtClose(hmMutex);
       //} ITH_EXCEPT {}
     } break;
   }

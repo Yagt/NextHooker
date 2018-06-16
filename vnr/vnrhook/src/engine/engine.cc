@@ -17,6 +17,7 @@
 #include "src/except.h"
 #include "ithsys/ithsys.h"
 #include "memdbg/memsearch.h"
+#include "ntinspect/ntinspect.h"
 #include "disasm/disasm.h"
 #include "cpputil/cppcstring.h"
 #include "mono/monoobject.h"
@@ -1399,7 +1400,7 @@ bool KiriKiriZHook1(DWORD esp_base, HookParam *)
 bool InsertKiriKiriZHook1()
 {
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:KiriKiriZ1: failed to get memory range");
     return false;
   }
@@ -2652,7 +2653,7 @@ void SpecialHookSiglus4(DWORD esp_base, HookParam *hp, BYTE, DWORD *data, DWORD 
 bool InsertSiglus4Hook()
 {
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:Siglus4: failed to get memory range");
     return false;
   }
@@ -4113,7 +4114,7 @@ bool InsertMajiroHook()
 {
   // jichi 7/12/2014: Change to accurate memory ranges
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:Majiro: failed to get memory range");
     return false;
   }
@@ -4170,7 +4171,7 @@ bool InsertCMVS1Hook()
 {
   // jichi 7/12/2014: Change to accurate memory ranges
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:CMVS1: failed to get memory range");
     return false;
   }
@@ -4367,7 +4368,7 @@ void SpecialHookRUGP1(DWORD esp_base, HookParam *hp, BYTE, DWORD *data, DWORD *s
 bool InsertRUGP1Hook()
 {
   DWORD low, high;
-  if (!Util::CheckFile(L"rvmm.dll") || !SafeFillRange(L"rvmm.dll", &low, &high)) {
+  if (!IthCheckFile(L"rvmm.dll") || !SafeFillRange(L"rvmm.dll", &low, &high)) {
     ConsoleOutput("vnreng:rUGP: rvmm.dll does not exist");
     return false;
   }
@@ -4510,7 +4511,7 @@ bool InsertRUGP1Hook()
 bool InsertRUGP2Hook()
 {
   DWORD low, high;
-  if (!Util::CheckFile(L"vm60.dll") || !SafeFillRange(L"vm60.dll", &low, &high)) {
+  if (!IthCheckFile(L"vm60.dll") || !SafeFillRange(L"vm60.dll", &low, &high)) {
     ConsoleOutput("vnreng:rUGP2: vm60.dll does not exist");
     return false;
   }
@@ -5545,10 +5546,12 @@ static bool InsertSystem43NewHook(ULONG startAddress, ULONG stopAddress, LPCSTR 
 
 bool InsertSystem43Hook()
 {
-  //bool patched = Util::CheckFile(L"AliceRunPatch.dll");
+  //bool patched = IthCheckFile(L"AliceRunPatch.dll");
   bool patched = ::GetModuleHandleA("AliceRunPatch.dll");
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) {
+  if (patched ?
+      !NtInspect::getModuleMemoryRange(L"AliceRunPatch.dll", &startAddress, &stopAddress) :
+      !NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) {
     ConsoleOutput("vnreng:System43: failed to get memory range");
     return false;
   }
@@ -5774,7 +5777,7 @@ void SpecialHookShina1(DWORD esp_base, HookParam *hp, BYTE, DWORD *data, DWORD *
 int GetShinaRioVersion()
 {
   int ret = 0;
-  HANDLE hFile = CreateFileW(L"RIO.INI", FILE_READ_DATA, FILE_SHARE_READ, nullptr, FILE_OPEN, FILE_ATTRIBUTE_NORMAL, nullptr);
+  HANDLE hFile = IthCreateFile(L"RIO.INI", FILE_READ_DATA, FILE_SHARE_READ, FILE_OPEN);
   if (hFile == INVALID_HANDLE_VALUE)  {
     size_t len = ::wcslen(process_name_);
     if (len > 3) {
@@ -5783,7 +5786,7 @@ int GetShinaRioVersion()
       fname[len -1] = 'i';
       fname[len -2] = 'n';
       fname[len -3] = 'i';
-      hFile = CreateFileW(fname, FILE_READ_DATA, FILE_SHARE_READ, nullptr, FILE_OPEN, FILE_ATTRIBUTE_NORMAL, nullptr);
+      hFile = IthCreateFile(fname, FILE_READ_DATA, FILE_SHARE_READ, FILE_OPEN);
     }
   }
 
@@ -5792,8 +5795,8 @@ int GetShinaRioVersion()
     //char *buffer,*version;//,*ptr;
     enum { BufferSize = 0x40 };
     char buffer[BufferSize];
-    ReadFile(hFile, buffer, BufferSize, nullptr, nullptr);
-    CloseHandle(hFile);
+    NtReadFile(hFile, 0, 0, 0, &ios, buffer, BufferSize, 0, 0);
+    NtClose(hFile);
     if (buffer[0] == '[') {
       buffer[0x3f] = 0; // jichi 8/24/2013: prevent strstr from overflow
       if (char *version = ::strstr(buffer, "v2."))
@@ -5929,7 +5932,7 @@ bool InsertWaffleDynamicHook(LPVOID addr, DWORD frame, DWORD stack)
 //    str = *(DWORD*)stack;
 //    if ((str >> 16) != (stack >> 16))
 //    {
-//      status = NtQueryVirtualMemory(GetCurrentProcess(),(PVOID)str,MemoryBasicInformation,&info,sizeof(info),0);
+//      status = NtQueryVirtualMemory(NtCurrentProcess(),(PVOID)str,MemoryBasicInformation,&info,sizeof(info),0);
 //      if (!NT_SUCCESS(status) || info.Protect & PAGE_NOACCESS) continue; //Accessible
 //    }
 //    if (*(WORD*)(str + 4) == ch) break;
@@ -6312,7 +6315,7 @@ bool InsertCotophaHook()
 {
   // jichi 7/12/2014: Change to accurate memory ranges
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:Cotopha: failed to get memory range");
     return false;
   }
@@ -6494,7 +6497,7 @@ bool InsertCatSystemHook()
 
   // jichi 7/12/2014: Change to accurate memory ranges
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:CatSystem2: failed to get memory range");
     return false;
   }
@@ -6512,7 +6515,7 @@ bool InsertCatSystemHook()
   hp.length_offset = 1; // only 1 character
 
   // jichi 12/23/2014: Modify split for new catsystem
-  bool newEngine = Util::CheckFile(L"cs2conf.dll");
+  bool newEngine = IthCheckFile(L"cs2conf.dll");
   if (newEngine) {
     hp.text_fun = SpecialHookCatSystem3; // type not needed
     NewHook(hp, "CatSystem3");
@@ -7103,7 +7106,7 @@ bool InsertMalie4Hook()
 
 bool InsertMalieHook()
 {
-  if (Util::CheckFile(L"tools.dll"))
+  if (IthCheckFile(L"tools.dll"))
     return InsertMalieHook1(); // jichi 3/5/2015: For old light games such as Dies irae.
 
   else { // For old Malie games before 2015
@@ -7112,8 +7115,8 @@ bool InsertMalieHook()
     bool ok = false;
 
     // jichi 3/12/2015: Disable MalieHook2 which will crash シルヴァリオ ヴェンッ�タ
-    //if (!Util::CheckFile(L"gdiplus.dll"))
-    if (Util::CheckFile(L"System\\*")) { // Insert old Malie hook. There are usually System/cursor.cur
+    //if (!IthCheckFile(L"gdiplus.dll"))
+    if (IthFindFile(L"System\\*")) { // Insert old Malie hook. There are usually System/cursor.cur
       ok = InsertMalieHook2() || ok;
       ok = InsertMalie2Hook() || ok; // jichi 8/20/2013
     }
@@ -7691,7 +7694,7 @@ bool InsertLiveHook()
 
 void InsertBrunsHook()
 {
-  if (Util::CheckFile(L"libscr.dll")) {
+  if (IthCheckFile(L"libscr.dll")) {
     HookParam hp = {};
     hp.offset = 4;
     hp.length_offset = 1;
@@ -7699,13 +7702,13 @@ void InsertBrunsHook()
     // jichi 12/27/2013: This function does not work for the latest bruns games anymore
     hp.function = 0x8b24c7bc;
     //?push_back@?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QAEXG@Z
-    if (Util::CheckFile(L"msvcp90.dll"))
+    if (IthCheckFile(L"msvcp90.dll"))
       hp.module = 0xc9c36a5b; // 3385027163
-    else if (Util::CheckFile(L"msvcp80.dll"))
+    else if (IthCheckFile(L"msvcp80.dll"))
       hp.module = 0xa9c36a5b; // 2848156251
-    else if (Util::CheckFile(L"msvcp100.dll")) // jichi 8/17/2013: MSVCRT 10.0 and 11.0
+    else if (IthCheckFile(L"msvcp100.dll")) // jichi 8/17/2013: MSVCRT 10.0 and 11.0
       hp.module = 0xb571d760; // 3044136800;
-    else if (Util::CheckFile(L"msvcp110.dll"))
+    else if (IthCheckFile(L"msvcp110.dll"))
       hp.module = 0xd571d760; // 3581007712;
     if (hp.module) {
       ConsoleOutput("vnreng: INSERT Brus#1");
@@ -7971,7 +7974,7 @@ bool InsertCandyHook2()
 bool InsertCandyHook()
 {
   //if (0 == _wcsicmp(process_name_, L"systemc.exe"))
-  if (Util::CheckFile(L"SystemC.exe"))
+  if (IthCheckFile(L"SystemC.exe"))
     return InsertCandyHook1();
   else
     return InsertCandyHook2();
@@ -8185,10 +8188,10 @@ bool IsPensilSetup()
   IO_STATUS_BLOCK ios;
   LPVOID buffer = nullptr;
   NtQueryInformationFile(hFile, &ios, &info, sizeof(info), FileStandardInformation);
-  NtAllocateVirtualMemory(GetCurrentProcess(), &buffer, 0,
+  NtAllocateVirtualMemory(NtCurrentProcess(), &buffer, 0,
       &info.AllocationSize.LowPart, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
   NtReadFile(hFile, 0,0,0, &ios, buffer, info.EndOfFile.LowPart, 0, 0);
-  CloseHandle(hFile);
+  NtClose(hFile);
   BYTE *b = (BYTE *)buffer;
   DWORD len = info.EndOfFile.LowPart & ~1;
   if (len == info.AllocationSize.LowPart)
@@ -8196,7 +8199,7 @@ bool IsPensilSetup()
   b[len] = 0;
   b[len + 1] = 0;
   bool ret = wcsstr((LPWSTR)buffer, L"PENSIL") || wcsstr((LPWSTR)buffer, L"Pensil");
-  NtFreeVirtualMemory(GetCurrentProcess(), &buffer, &info.AllocationSize.LowPart, MEM_RELEASE);
+  NtFreeVirtualMemory(NtCurrentProcess(), &buffer, &info.AllocationSize.LowPart, MEM_RELEASE);
   return ret;
 }
 #endif // if 0
@@ -8267,7 +8270,7 @@ void SpecialHookDebonosuName(DWORD esp_base, HookParam *hp, BYTE, DWORD *data, D
 bool InsertDebonosuNameHook()
 {
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:Silkys: failed to get memory range");
     return false;
   }
@@ -8429,13 +8432,13 @@ int GetSystemAoiVersion() // return result is cached
 {
   static int ret = 0;
   if (!ret) {
-    if (Util::CheckFile(L"Aoi4.dll"))
+    if (IthCheckFile(L"Aoi4.dll"))
       ret = 4;
-    else if (Util::CheckFile(L"Aoi5.dll"))
+    else if (IthCheckFile(L"Aoi5.dll"))
       ret = 5;
-    else if (Util::CheckFile(L"Aoi6.dll")) // not exist yet, for future version
+    else if (IthCheckFile(L"Aoi6.dll")) // not exist yet, for future version
       ret = 6;
-    else if (Util::CheckFile(L"Aoi7.dll")) // not exist yet, for future version
+    else if (IthCheckFile(L"Aoi7.dll")) // not exist yet, for future version
       ret = 7;
     else // AoiLib.dll, etc
       ret = 3;
@@ -8761,7 +8764,7 @@ void SpecialHookWolf2(DWORD esp_base, HookParam *, BYTE, DWORD *data, DWORD *spl
 bool InsertWolf2Hook()
 {
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:WolfRPG2: failed to get memory range");
     return false;
   }
@@ -8850,23 +8853,23 @@ MEMORY_WORKING_SET_LIST *GetWorkingSet()
   NTSTATUS status;
   LPVOID buffer = 0;
   len = 0x4000;
-  status = NtAllocateVirtualMemory(GetCurrentProcess(), &buffer, 0, &len, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+  status = NtAllocateVirtualMemory(NtCurrentProcess(), &buffer, 0, &len, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
   if (!NT_SUCCESS(status)) return 0;
-  status = NtQueryVirtualMemory(GetCurrentProcess(), 0, MemoryWorkingSetList, buffer, len, &retl);
+  status = NtQueryVirtualMemory(NtCurrentProcess(), 0, MemoryWorkingSetList, buffer, len, &retl);
   if (status == STATUS_INFO_LENGTH_MISMATCH) {
     len = *(DWORD*)buffer;
     len = ((len << 2) & 0xfffff000) + 0x4000;
     retl = 0;
-    NtFreeVirtualMemory(GetCurrentProcess(), &buffer, &retl, MEM_RELEASE);
+    NtFreeVirtualMemory(NtCurrentProcess(), &buffer, &retl, MEM_RELEASE);
     buffer = 0;
-    status = NtAllocateVirtualMemory(GetCurrentProcess(), &buffer, 0, &len, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+    status = NtAllocateVirtualMemory(NtCurrentProcess(), &buffer, 0, &len, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
     if (!NT_SUCCESS(status)) return 0;
-    status = NtQueryVirtualMemory(GetCurrentProcess(), 0, MemoryWorkingSetList, buffer, len, &retl);
+    status = NtQueryVirtualMemory(NtCurrentProcess(), 0, MemoryWorkingSetList, buffer, len, &retl);
     if (!NT_SUCCESS(status)) return 0;
     return (MEMORY_WORKING_SET_LIST*)buffer;
   } else {
     retl = 0;
-    NtFreeVirtualMemory(GetCurrentProcess(), &buffer, &retl, MEM_RELEASE);
+    NtFreeVirtualMemory(NtCurrentProcess(), &buffer, &retl, MEM_RELEASE);
     return 0;
   }
 
@@ -8917,7 +8920,7 @@ BOOL FindCharacteristInstruction(MEMORY_WORKING_SET_LIST *list)
     else {
       if (size > 0x2000) {
         addr = base & ~0xfff;
-        status = NtQueryVirtualMemory(GetCurrentProcess(),(PVOID)addr,
+        status = NtQueryVirtualMemory(NtCurrentProcess(),(PVOID)addr,
             MemorySectionName,text_buffer_prev,0x1000,&retl);
         if (!NT_SUCCESS(status)) {
           k = addr + size - 4;
@@ -8959,7 +8962,7 @@ bool InsertAB2TryHook()
     ConsoleOutput("vnreng:AB2Try: cannot find characteristic sequence");
   //L"Make sure you have start the game and have seen some text on the screen.");
   DWORD size = 0;
-  NtFreeVirtualMemory(GetCurrentProcess(), (PVOID *)&list, &size, MEM_RELEASE);
+  NtFreeVirtualMemory(NtCurrentProcess(), (PVOID *)&list, &size, MEM_RELEASE);
   return ret;
 }
 
@@ -9102,7 +9105,7 @@ namespace { // unnamed
 static bool InsertWillPlusHook2() // jichi 1/18/2015: Add new hook
 {
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:WillPlus2: failed to get memory range");
     return false;
   }
@@ -9737,7 +9740,7 @@ static bool InsertGXP1Hook()
 static bool InsertGXP2Hook()
 {
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) {
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) {
     ConsoleOutput("vnreng:GXP2: failed to get memory range");
     return false;
   }
@@ -9938,7 +9941,7 @@ bool InsertNextonHook()
   };
   enum { addr_offset = 0x0044d69e - 0x0044d696 }; // = 8
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) {
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) {
     ConsoleOutput("vnreng:NEXTON: failed to get memory range");
     return false;
   }
@@ -10200,7 +10203,7 @@ bool InsertNexton1Hook()
   // Use accurate stopAddress in case of running out of memory
   // Since the file pattern for Nexton1 is not accurate.
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) {
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) {
     ConsoleOutput("vnreng:NEXTON1: failed to get memory range");
     return false;
   }
@@ -11840,7 +11843,7 @@ static void SpecialHookSilkys(DWORD esp_base, HookParam *, BYTE, DWORD *data, DW
 bool InsertSilkysHook()
 {
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:Silkys: failed to get memory range");
     return false;
   }
@@ -12318,7 +12321,7 @@ bool InsertSilkysHook()
 bool InsertEushullyHook()
 {
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:Eushully: failed to get memory range");
     return false;
   }
@@ -15902,7 +15905,7 @@ bool InsertShinyDaysGameHook()
 bool InsertLovaGameHook()
 {
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:LOVA: failed to get memory range");
     return false;
   }
@@ -16581,7 +16584,7 @@ bool InsertPPSSPPHLEHooks()
 {
   ConsoleOutput("vnreng: PPSSPP HLE: enter");
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng:PPSSPP HLE: failed to get memory range");
     return false;
   }
@@ -19215,7 +19218,7 @@ static void SpecialPPSSPPHookOtomate(DWORD esp_base, HookParam *hp, BYTE, DWORD 
 bool InsertOtomatePPSSPPHook()
 {
   ULONG startAddress, stopAddress;
-  if (!FillRange(process_name_,&startAddress, &stopAddress)) { // need accurate stopAddress
+  if (!NtInspect::getProcessMemoryRange(&startAddress, &stopAddress)) { // need accurate stopAddress
     ConsoleOutput("vnreng: Otomate PPSSPP: failed to get memory range");
     return false;
   }

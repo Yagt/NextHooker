@@ -488,8 +488,12 @@ DWORD TextHook::UnsafeSend(DWORD dwDataBase, DWORD dwRetn)
     if (dwCount) {
       IO_STATUS_BLOCK ios = {};
 
+      IthCoolDown(); // jichi 9/28/2013: cool down to prevent parallelization in wine
       //CliLockPipe();
-	  WriteFile(::hookPipe, pbData, dwCount + HEADER_SIZE, nullptr, nullptr);
+      if (STATUS_PENDING == NtWriteFile(::hookPipe, 0, 0, 0, &ios, pbData, dwCount + HEADER_SIZE, 0, 0)) {
+        NtWaitForSingleObject(::hookPipe, 0, 0);
+        NtFlushBuffersFile(::hookPipe, &ios);
+      }
       //CliUnlockPipe();
     }
     if (pbData != pbSmallBuff)
@@ -502,9 +506,9 @@ DWORD TextHook::UnsafeSend(DWORD dwDataBase, DWORD dwRetn)
 int TextHook::InsertHook()
 {
   //ConsoleOutput("vnrcli:InsertHook: enter");
-  WaitForSingleObject(hmMutex, 0);
+  NtWaitForSingleObject(hmMutex, 0, 0);
   int ok = InsertHookCode();
-  ReleaseMutex(hmMutex);
+  IthReleaseMutex(hmMutex);
   if (hp.type & HOOK_ADDITIONAL) {
     NotifyHookInsert(hp.address);
     //ConsoleOutput(hook_name);
@@ -583,7 +587,7 @@ int TextHook::UnsafeInsertHookCode()
 
   // Verify hp.address.
   MEMORY_BASIC_INFORMATION info = {};
-  NtQueryVirtualMemory(GetCurrentProcess(), (LPVOID)hp.address, MemoryBasicInformation, &info, sizeof(info), nullptr);
+  NtQueryVirtualMemory(NtCurrentProcess(), (LPVOID)hp.address, MemoryBasicInformation, &info, sizeof(info), nullptr);
   if (info.Type & PAGE_NOACCESS) {
     ConsoleOutput("vnrcli:UnsafeInsertHookCode: FAILED: page no access");
     return no;
@@ -660,13 +664,13 @@ int TextHook::UnsafeInsertHookCode()
   // See: http://undocumented.ntinternals.net/UserMode/Undocumented%20Functions/Memory%20Management/Virtual%20Memory/NtProtectVirtualMemory.html
   // See: http://doxygen.reactos.org/d8/d6b/ndk_2mmfuncs_8h_af942709e0c57981d84586e74621912cd.html
   DWORD addr = hp.address;
-  NtProtectVirtualMemory(GetCurrentProcess(), (PVOID *)&addr, &t, PAGE_EXECUTE_READWRITE, &old);
-  NtWriteVirtualMemory(GetCurrentProcess(), (BYTE *)hp.address, inst, 5, &t);
+  NtProtectVirtualMemory(NtCurrentProcess(), (PVOID *)&addr, &t, PAGE_EXECUTE_READWRITE, &old);
+  NtWriteVirtualMemory(NtCurrentProcess(), (BYTE *)hp.address, inst, 5, &t);
   len = hp.recover_len - 5;
   if (len)
-    NtWriteVirtualMemory(GetCurrentProcess(), (BYTE *)hp.address + 5, int3, len, &t);
-  NtFlushInstructionCache(GetCurrentProcess(), (LPVOID)hp.address, hp.recover_len);
-  NtFlushInstructionCache(GetCurrentProcess(), (LPVOID)::hookman, 0x1000);
+    NtWriteVirtualMemory(NtCurrentProcess(), (BYTE *)hp.address + 5, int3, len, &t);
+  NtFlushInstructionCache(NtCurrentProcess(), (LPVOID)hp.address, hp.recover_len);
+  NtFlushInstructionCache(NtCurrentProcess(), (LPVOID)::hookman, 0x1000);
   //ConsoleOutput("vnrcli:UnsafeInsertHookCode: leave: succeed");
   return 0;
 }
@@ -674,7 +678,7 @@ int TextHook::UnsafeInsertHookCode()
 int TextHook::InitHook(LPVOID addr, DWORD data, DWORD data_ind,
     DWORD split_off, DWORD split_ind, WORD type, DWORD len_off)
 {
-  WaitForSingleObject(hmMutex, 0);
+  NtWaitForSingleObject(hmMutex, 0, 0);
   hp.address = (DWORD)addr;
   hp.offset = data;
   hp.index = data_ind;
@@ -687,13 +691,13 @@ int TextHook::InitHook(LPVOID addr, DWORD data, DWORD data_ind,
   currentHook++;
   if (current_available >= this)
     for (current_available = this + 1; current_available->Address(); current_available++);
-  ReleaseMutex(hmMutex);
+  IthReleaseMutex(hmMutex);
   return this - hookman;
 }
 
 int TextHook::InitHook(const HookParam &h, LPCSTR name, WORD set_flag)
 {
-  WaitForSingleObject(hmMutex, 0);
+  NtWaitForSingleObject(hmMutex, 0, 0);
   hp = h;
   hp.type |= set_flag;
   if (name && name != hook_name) {
@@ -703,7 +707,7 @@ int TextHook::InitHook(const HookParam &h, LPCSTR name, WORD set_flag)
   current_available = this+1;
   while (current_available->Address())
     current_available++;
-  ReleaseMutex(hmMutex);
+  IthReleaseMutex(hmMutex);
   return 1;
 }
 
@@ -713,24 +717,25 @@ int TextHook::RemoveHook()
   if (!hp.address)
     return no;
   ConsoleOutput("vnrcli:RemoveHook: enter");
-  WaitForSingleObject(hmMutex, TIMEOUT); // jichi 9/28/2012: wait at most for 5 seconds
+  const LONGLONG timeout = -50000000; // jichi 9/28/2012: in 100ns, wait at most for 5 seconds
+  NtWaitForSingleObject(hmMutex, 0, (PLARGE_INTEGER)&timeout);
   DWORD l = hp.hook_len;
   //with_seh({ // jichi 9/17/2013: might crash ><
   // jichi 12/25/2013: Actually, __try cannot catch such kind of exception
   ITH_TRY {
-    NtWriteVirtualMemory(GetCurrentProcess(), (LPVOID)hp.address, original, hp.recover_len, &l);
-    NtFlushInstructionCache(GetCurrentProcess(), (LPVOID)hp.address, hp.recover_len);
+    NtWriteVirtualMemory(NtCurrentProcess(), (LPVOID)hp.address, original, hp.recover_len, &l);
+    NtFlushInstructionCache(NtCurrentProcess(), (LPVOID)hp.address, hp.recover_len);
   } ITH_EXCEPT {}
   //});
   hp.hook_len = 0;
-  ReleaseMutex(hmMutex);
+  IthReleaseMutex(hmMutex);
   ConsoleOutput("vnrcli:RemoveHook: leave");
   return yes;
 }
 
 int TextHook::ClearHook()
 {
-  WaitForSingleObject(hmMutex, 0);
+  NtWaitForSingleObject(hmMutex, 0, 0);
   int err = RemoveHook();
   if (hook_name) {
     delete[] hook_name;
@@ -740,7 +745,7 @@ int TextHook::ClearHook()
   //if (current_available>this)
   //  current_available = this;
   currentHook--;
-  ReleaseMutex(hmMutex);
+  IthReleaseMutex(hmMutex);
   return err;
 }
 
@@ -838,9 +843,9 @@ EXCEPTION_DISPOSITION ExceptHandler(EXCEPTION_RECORD *ExceptionRecord,
   //swprintf(str, L"Exception code: 0x%.8X", ExceptionRecord->ExceptionCode);
   //ConsoleOutput(str);
   //MEMORY_BASIC_INFORMATION info;
-  //if (NT_SUCCESS(NtQueryVirtualMemory(GetCurrentProcess(),(PVOID)ContextRecord->Eip,
+  //if (NT_SUCCESS(NtQueryVirtualMemory(NtCurrentProcess(),(PVOID)ContextRecord->Eip,
   //    MemoryBasicInformation,&info,sizeof(info),0)) &&
-  //    NT_SUCCESS(NtQueryVirtualMemory(GetCurrentProcess(),(PVOID)ContextRecord->Eip,
+  //    NT_SUCCESS(NtQueryVirtualMemory(NtCurrentProcess(),(PVOID)ContextRecord->Eip,
   //    MemorySectionName,name,0x200,0))) {
   //  swprintf(str, L"Exception offset: 0x%.8X:%s",
   //      ContextRecord->Eip-(DWORD)info.AllocationBase,
@@ -865,9 +870,9 @@ EXCEPTION_DISPOSITION ExceptHandler(EXCEPTION_RECORD *ExceptionRecord,
   //swprintf(str, L"Exception code: 0x%.8X", ExceptionRecord->ExceptionCode);
   //ConsoleOutput(str);
   //MEMORY_BASIC_INFORMATION info;
-  //if (NT_SUCCESS(NtQueryVirtualMemory(GetCurrentProcess(),(PVOID)ContextRecord->Eip,
+  //if (NT_SUCCESS(NtQueryVirtualMemory(NtCurrentProcess(),(PVOID)ContextRecord->Eip,
   //    MemoryBasicInformation,&info,sizeof(info),0)) &&
-  //    NT_SUCCESS(NtQueryVirtualMemory(GetCurrentProcess(),(PVOID)ContextRecord->Eip,
+  //    NT_SUCCESS(NtQueryVirtualMemory(NtCurrentProcess(),(PVOID)ContextRecord->Eip,
   //    MemorySectionName,name,0x200,0))) {
   //  swprintf(str, L"Exception offset: 0x%.8X:%s",
   //      ContextRecord->Eip-(DWORD)info.AllocationBase,

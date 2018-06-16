@@ -248,6 +248,4 @@ enum {
   , IHF_FILTER_CAPACITY = IHF_FILTER_COUNT + 1  // one more than the dll count
 };
 
-#define TIMEOUT 5000 // 5 seconds
-
 // EOF

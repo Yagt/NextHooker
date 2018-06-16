@@ -3,7 +3,7 @@
 // util.h
 // 8/23/2013 jichi
 
-#include <Windows.h>
+#include "ntdll/ntdll.h"
 
 namespace Util {
 
@@ -18,12 +18,45 @@ DWORD FindCallAndEntryAbs(DWORD fun, DWORD size, DWORD pt, DWORD sig);
 DWORD FindCallAndEntryRel(DWORD fun, DWORD size, DWORD pt, DWORD sig);
 DWORD FindEntryAligned(DWORD start, DWORD back_range);
 DWORD FindImportEntry(DWORD hModule, DWORD fun);
-bool CheckFile(LPCWSTR name);
 
 // jichi 4/15/2014: Copied from ITH CLI, for debugging purpose
 DWORD FindModuleBase(DWORD hash);
 
 bool SearchResourceString(LPCWSTR str);
+
+/**
+ *  @param  name  process name without path deliminator
+ */
+inline void GetProcessName(wchar_t *name)
+{
+  //assert(name);
+  PLDR_DATA_TABLE_ENTRY it;
+  __asm
+  {
+    mov eax,fs:[0x30]
+    mov eax,[eax+0xc]
+    mov eax,[eax+0xc]
+    mov it,eax
+  }
+  ::wcscpy(name, it->BaseDllName.Buffer);
+}
+
+/**
+ *  @param  path with process name and directy name
+ */
+inline void GetProcessPath(wchar_t *path)
+{
+  //assert(path);
+  PLDR_DATA_TABLE_ENTRY it;
+  __asm
+  {
+    mov eax,fs:[0x30]
+    mov eax,[eax+0xc]
+    mov eax,[eax+0xc]
+    mov it,eax
+  }
+  ::wcscpy(path, it->FullDllName.Buffer);
+}
 
 /**
  *  @return  HANDLE  module handle
