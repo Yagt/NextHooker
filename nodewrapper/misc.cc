@@ -26,13 +26,13 @@ std::wstring GenerateHCodeWstring(HookParam hp, DWORD processId)
 	{
 		wss << std::hex << -(hp.offset + 4);
 		code.append(L"-" + wss.str());
-		wss.clear();
+		std::wstringstream().swap(wss);
 	}
 	else
 	{
 		wss << std::hex << hp.offset;
 		code.append(wss.str());
-		wss.clear();
+		std::wstringstream().swap(wss);
 	}
 	if (hp.type & DATA_INDIRECT)
 	{
@@ -40,13 +40,13 @@ std::wstring GenerateHCodeWstring(HookParam hp, DWORD processId)
 		{
 			wss << std::hex << -hp.index;
 			code.append(L"*-" + wss.str());
-			wss.clear();
+			std::wstringstream().swap(wss);
 		}
 		else
 		{
 			wss << std::hex << hp.index;
 			code.append(L"*" + wss.str());
-			wss.clear();
+			std::wstringstream().swap(wss);
 		}
 	}
 	if (hp.type & USING_SPLIT)
@@ -55,13 +55,13 @@ std::wstring GenerateHCodeWstring(HookParam hp, DWORD processId)
 		{
 			wss << std::hex << -(hp.split + 4);
 			code.append(L":-" + wss.str());
-			wss.clear();
+			std::wstringstream().swap(wss);
 		}
 		else
 		{
 			wss << std::hex << hp.split;
 			code.append(L":" + wss.str());
-			wss.clear();
+			std::wstringstream().swap(wss);
 		}
 	}
 	if (hp.type & SPLIT_INDIRECT)
@@ -70,19 +70,19 @@ std::wstring GenerateHCodeWstring(HookParam hp, DWORD processId)
 		{
 			wss << std::hex << -hp.split_index;
 			code.append(L"*-" + wss.str());
-			wss.clear();
+			std::wstringstream().swap(wss);
 		}
 		else
 		{
 			wss << std::hex << hp.split_index;
 			code.append(L"*" + wss.str());
-			wss.clear();
+			std::wstringstream().swap(wss);
 		}
 	}
 	code.append(L"@");
 	wss << std::hex << hp.address;
 	std::wstring badCode = code + wss.str();
-	wss.clear();
+	std::wstringstream().swap(wss);
 	for (std::wstring::iterator it = badCode.begin(); it != badCode.end(); ++it)
 		*it = towupper(*it);
 

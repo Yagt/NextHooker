@@ -42,8 +42,8 @@ std::wstring TextThreadToString(TextThread *thread)
 		<< std::hex << std::uppercase << tp.hook << L":"
 		<< std::hex << std::uppercase << tp.retn << L":" 
 		<< std::hex << std::uppercase << tp.spl << L":"
-		<< Host::GetHookName(tp.pid, tp.hook) << L" ("
-		<< GenerateHCodeWstring(Host::GetHookParam(tp.pid, tp.hook), tp.pid) << L")";
+		<< Host::GetHookName(tp.pid, tp.hook) << L":"
+		<< GenerateHCodeWstring(Host::GetHookParam(tp.pid, tp.hook), tp.pid);
 
 	return wss.str();
 }
