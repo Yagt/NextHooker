@@ -1,6 +1,6 @@
 {
-  "name": "node-nexthooker",
-  "version": "0.1.0",
+  "name": "nexthooker",
+  "version": "1.0.0",
   "description": "Update of ITHVNR. Hooks into and extracts text from video games.",
   "main": "index.js",
   "scripts": {
@@ -20,6 +20,9 @@
   ],
   "gypfile": true,
   "author": "tinyAdapter",
+  "maintainers": [
+    "tinyadapter"
+  ],
   "license": "GPL-3.0",
   "bugs": {
     "url": "https://github.com/Yagt/node-nexthooker/issues"

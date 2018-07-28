@@ -1,59 +1,34 @@
-# NextHooker
-
-
+# NextHooker Node.js Addon
 
 ## Overview
 
-*NextHooker* is an open-source x86~~ text hooker for Windows.
+node-nexthooker is a Node.js wrapper for NextHooker.
 
-Basically, GUI text hooker based on [Stomp](http://www.hongfire.com/forum/showthread.php/438331-ITHVNR-ITH-with-the-VNR-engine)'s ITHVNR.
+NextHooker is a GUI text hooker based on [Stomp](http://www.hongfire.com/forum/showthread.php/438331-ITHVNR-ITH-with-the-VNR-engine)'s ITHVNR.
 
-## Extensions
+## Usage
 
-See my [Example Extension project](https://github.com/Artikash/ExampleExtension) to see how to build an extension.
+### Get the latest version
 
-To use an extension, simply rename the extension dll file to ```{NUMBER}_{NAME}_nexthooker_extension.dll``` and copy into the NextHooker folder. 
+    npm install nexthooker
 
-Extensions are called in order by the number they are prefixed with.
+or
 
-## Downloads
+    git clone https://github.com/Yagt/node-nexthooker
 
-Releases of *NextHooker* can be found [here](https://github.com/Artikash/NextHooker/releases)
+### Build Library
 
-Previous releases of *ITHVNR* can be found [here](https://github.com/mireado/ITHVNR/releases).
+1. Open CMakeLists.txt from Visual Studio
+2. CMake -> Generate All
 
-## Features
+### Rebuild Node.js
 
-- Open-source
-- Hook text (most AGTH hook codes supported)
-- Auto hook many engines (including some not supported by VNR!)
-- Extensions (New!)
+    npm install
+
+### Run test program
+
+    node index.js <PID_OF_GAME>
 
 ## License
 
 GPL v3
-
-## Developers
-
-- Copyright (C) 2010-2012  [kaosu](http://www.hongfire.com/forum/member/562651-kaosu)
-- VNR engine making by [jichi](http://sakuradite.com/topic)
-- ITH updating by [Andys](https://github.com/AndyScull)
-- ITHVNR new GUI & VNR engine migration by [Stomp](http://www.hongfire.com/forum/member/325894-stomp)
-- ITHVNR updating by [mireado](https://github.com/mireado) and [Eguni](https://github.com/Eguni)
-
-## Special Thanks
-
-- Everybody adding issues!
-
-## Compiling
-
-Before compiling *NextHooker*, you should get Visual Studio with CMake and ATL support, as well as Qt version 5.11<br>
-Use Visual Studio to compile all the CMake projects, then use Qt Creator to compile/run the GUI.
-
-## Project Architecture
-
-The GUI links to vnrhost.dll (created from the texthook folder) which injects vnrhook.dll (created from the vnrhook folder) into the target process and connects to it via 2 pipe files.<br>
-vnrhost writes to hostPipe, vnrhook writes to hookPipe (duh?)<br>
-vnrhook waits for the pipe to be connected, then injects a few instructions into any text outputting functions (e.g. TextOut, GetGlyphOutline) that cause their input to be sent through the pipe.<br>
-Additional information about hooks is shared through a file view (a.k.a. section object) that is mapped to a reference to the Hook class.<br>
-The text that vnrhost receives through the pipe is then processed a little before being dispatched back to the GUI and displayed.
