@@ -27,7 +27,7 @@ if you see an error with *node-gyp rebuild*, don't worry.
 
     cd .\node_modules\nexthooker
 
-1. Open \CMakeLists.txt from Visual Studio
+1. Open CMakeLists.txt from Visual Studio
 
 2. CMake -> Generate All
 
@@ -55,7 +55,7 @@ if you see an error with *node-gyp rebuild*, don't worry.
 
     .\node_modules\.bin\electron.cmd index.js <PID_OF_GAME>
 
-## Usage (with Node.js)
+## ~~Usage (with Node.js)~~
 
 ### Get the latest version
 
@@ -74,6 +74,21 @@ or
 
     npm install -g node-gyp
     node-gyp rebuild --debug && cp ./Builds/Debug/Debug/vnrhook.dll . && cp ./Builds/Debug/Debug/vnrhost.dll .
+
+### Create test program
+
+    const hooker = require('./build/Debug/nexthooker')
+    hooker.start()
+    hooker.onProcessDetach((pid) => { console.log(`process detached: ${pid}`) })
+    hooker.onProcessAttach((pid) => { console.log(`process attached: ${pid}`) })
+    hooker.onThreadCreate(
+        (ts) => { console.log(`thread create: ${ts}`) },
+        (ts, text) => { console.log(`get text '${text}' from thread: ${ts}`) }
+    )
+    hooker.onThreadRemove((ts) => { console.log(`thread removed: ${ts}`) })
+    hooker.open()
+    hooker.injectProcess(parseInt(process.argv[2]))
+    /* index.js */
 
 ### Run test program
 
