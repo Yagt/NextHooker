@@ -1,3 +1,6 @@
-Builds/
 *.vs/
 *.pro.user
+.npmignore
+build/
+Builds/
+node_modules/

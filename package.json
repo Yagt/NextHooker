@@ -1,0 +1,31 @@
+{
+  "name": "node-nexthooker",
+  "version": "0.1.0",
+  "description": "Update of ITHVNR. Hooks into and extracts text from video games.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "install": "node-gyp rebuild --debug && cp ./Builds/Debug/Debug/vnrhook.dll . && cp ./Builds/Debug/Debug/vnrhost.dll .",
+    "build32": "node-gyp clean configure build --arch=ia32",
+    "build64": "node-gyp clean configure build --arch=x64"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yagt/node-nexthooker.git"
+  },
+  "keywords": [
+    "text",
+    "hooker",
+    "addon"
+  ],
+  "gypfile": true,
+  "author": "tinyAdapter",
+  "license": "GPL-3.0",
+  "bugs": {
+    "url": "https://github.com/Yagt/node-nexthooker/issues"
+  },
+  "homepage": "https://github.com/Yagt/node-nexthooker#readme",
+  "dependencies": {
+    "nan": "^2.10.0"
+  }
+}
