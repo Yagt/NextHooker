@@ -1,8 +1,8 @@
 {
   "name": "nexthooker",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "description": "Update of ITHVNR. Hooks into and extracts text from video games.",
-  "main": "index.js",
+  "main": "./build/Debug/nexthooker.node",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

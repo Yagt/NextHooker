@@ -36,6 +36,10 @@ if you see an error with *node-gyp rebuild*, don't worry.
     npm install -g node-gyp
     node-gyp rebuild --target=<ELECTRON_VERSION> --arch=ia32 --dist-url=https://atom.io/download/electron --debug
 
+### Copy Library to Build Folder
+
+    cp ./Builds/Debug/Debug/vnrhook.dll ./build/Debug && cp ./Builds/Debug/Debug/vnrhost.dll ./build/Debug
+
 ### Create test program
 
     const hooker = require('nexthooker/build/Debug/nexthooker')
