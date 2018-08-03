@@ -8,10 +8,15 @@
 #include <vector>
 #include <QComboBox>
 
-std::map<int, std::wstring> LoadExtensions();
+std::map<int, QString> LoadExtensions();
 std::wstring DispatchSentenceToExtensions(std::wstring sentence, std::unordered_map<std::string, int> miscInfo);
-
-typedef std::wstring(*ExtensionFunction)(std::wstring, std::unordered_map<std::string, int>&);
+struct InfoForExtension
+{
+	char* propertyName;
+	int propertyValue;
+	InfoForExtension* nextProperty;
+};
+typedef const wchar_t*(*ExtensionFunction)(const wchar_t*, const InfoForExtension*);
 extern QComboBox* ttCombo;
 
 #endif // EXTENSIONS_H
