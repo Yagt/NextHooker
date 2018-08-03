@@ -13,12 +13,11 @@ extern HWND dummyWindow;
 
 #define TT_LOCK CriticalSectionLocker ttLocker(ttCs) // Synchronized scope for accessing private data
 
-TextThread::TextThread(ThreadParameter tp, unsigned int threadNumber, unsigned int splitDelay) :
+TextThread::TextThread(ThreadParameter tp, unsigned int threadNumber, DWORD status) :
 	storage(),
 	sentenceBuffer(),
-	status(0),
+	status(status),
 	threadNumber(threadNumber),
-	splitDelay(splitDelay),
 	output(nullptr),
 	tp(tp)
 {
@@ -28,6 +27,7 @@ TextThread::TextThread(ThreadParameter tp, unsigned int threadNumber, unsigned i
 TextThread::~TextThread()
 {
 	EnterCriticalSection(&ttCs);
+	KillTimer(dummyWindow, (UINT_PTR)this);
 	LeaveCriticalSection(&ttCs);
 	DeleteCriticalSection(&ttCs);
 }
@@ -53,6 +53,12 @@ void TextThread::AddSentence()
 	{
 		sentence = std::wstring((wchar_t*)sentenceBuffer.data(), sentenceBuffer.size() / 2);
 	}
+	else if (status & USING_UTF8)
+	{
+		wchar_t* converted = new wchar_t[sentenceBuffer.size()];
+		sentence = std::wstring(converted, MultiByteToWideChar(CP_UTF8, 0, sentenceBuffer.data(), sentenceBuffer.size(), converted, sentenceBuffer.size()));
+		delete[] converted;
+	}
 	else
 	{
 		wchar_t* converted = new wchar_t[sentenceBuffer.size()];
@@ -75,7 +81,7 @@ void TextThread::AddText(const BYTE *con, int len)
 {
 	TT_LOCK;
 	sentenceBuffer.insert(sentenceBuffer.end(), con, con + len);
-	SetTimer(dummyWindow, (UINT_PTR)this, splitDelay,
+	SetTimer(dummyWindow, (UINT_PTR)this, 250, // TODO: Let user change delay before sentenceBuffer is flushed
 		[](HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 	{
 		KillTimer(hWnd, idEvent);
