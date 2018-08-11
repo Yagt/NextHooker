@@ -26,8 +26,8 @@ NAN_MODULE_INIT(InitAll) {
 		GetFunction(New<FunctionTemplate>(NodeWrapper::InjectProcess)).ToLocalChecked());
 	Set(target, New<String>("detachProcess").ToLocalChecked(),
 		GetFunction(New<FunctionTemplate>(NodeWrapper::DetachProcess)).ToLocalChecked());
-	//Set(target, New<String>("insertHook").ToLocalChecked(),
-	//	GetFunction(New<FunctionTemplate>(NodeWrapper::InsertHook)).ToLocalChecked());
+	Set(target, New<String>("insertHook").ToLocalChecked(),
+		GetFunction(New<FunctionTemplate>(NodeWrapper::InsertHook)).ToLocalChecked());
 	//Set(target, New<String>("removeHook").ToLocalChecked(),
 	//	GetFunction(New<FunctionTemplate>(NodeWrapper::RemoveHook)).ToLocalChecked());
 }

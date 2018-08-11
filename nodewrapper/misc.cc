@@ -1,4 +1,14 @@
 #include "misc.h"
+#include <iostream>
+
+DWORD Hash(std::wstring module)
+{
+	for (std::wstring::iterator it = module.begin(); it != module.end(); ++it)
+		*it = towlower(*it);
+	DWORD hash = 0;
+	for (auto i : module) hash = _rotr(hash, 7) + i;
+	return hash;
+}
 
 std::wstring GenerateHCodeWstring(HookParam hp, DWORD processId)
 {
@@ -99,4 +109,115 @@ std::wstring GenerateHCodeWstring(HookParam hp, DWORD processId)
 		*it = towupper(*it);
 	code.append(wcsrchr(buffer, L'\\') + 1);
 	return code;
+}
+
+HookParam ParseHCodeWstring(std::wstring HCode)
+{
+	HookParam hp = {};
+	for (std::wstring::iterator it = HCode.begin(); it != HCode.end(); ++it)
+		*it = towupper(*it);
+
+	if (HCode.find(L"/H") != 0) return {};
+	HCode.erase(0, 2);
+
+	if (HCode.length() < 1) return {};
+	switch (HCode[0])
+	{
+	case L'S':
+		hp.type |= USING_STRING;
+		break;
+	case L'A':
+		hp.type |= BIG_ENDIAN;
+		hp.length_offset = 1;
+		break;
+	case L'B':
+		hp.length_offset = 1;
+		break;
+	case L'Q':
+		hp.type |= USING_STRING | USING_UNICODE;
+		break;
+	case L'W':
+		hp.type |= USING_UNICODE;
+		hp.length_offset = 1;
+		break;
+	case L'V':
+		hp.type |= USING_STRING | USING_UTF8;
+		break;
+	default:
+		return {};
+	}
+	HCode.erase(0, 1);
+
+	if (HCode.length() < 1) return {};
+	if (HCode[0] == L'N')
+	{
+		hp.type |= NO_CONTEXT;
+		HCode.erase(0, 1);
+	}
+
+	std::wstringstream wss;
+	std::wsmatch wsm;
+
+	std::wregex dataOffset(L"\\-?[\\dA-F]+");
+	std::regex_search(HCode.cbegin(), HCode.cend(), wsm, dataOffset);
+	if (wsm.size() == 0) return {};
+	wss << std::hex << wsm[0].str();
+	wss >> hp.offset;
+	std::wstringstream().swap(wss);
+	HCode.erase(0, wsm[0].str().length());
+
+	std::wregex dataIndirect(L"^\\*(\\-?[\\dA-F]+)");
+	std::regex_search(HCode.cbegin(), HCode.cend(), wsm, dataIndirect);
+	if (wsm.size() != 0)
+	{
+		hp.type |= DATA_INDIRECT;
+		wss << std::hex << wsm[1].str();
+		wss >> hp.index;
+		std::wstringstream().swap(wss);
+		HCode.erase(0, wsm[0].str().length());
+	}
+
+	std::wregex split(L"^\\:(\\-?[\\dA-F]+)");
+	std::regex_search(HCode.cbegin(), HCode.cend(), wsm, split);
+	if (wsm.size() != 0)
+	{
+		hp.type |= USING_SPLIT;
+		wss << std::hex << wsm[1].str();
+		wss >> hp.split;
+		std::wstringstream().swap(wss);
+		HCode.erase(0, wsm[0].str().length());
+
+		std::wregex splitIndirect(L"^\\*(\\-?[\\dA-F]+)");
+		std::regex_search(HCode.cbegin(), HCode.cend(), wsm, splitIndirect);
+		if (wsm.size() != 0)
+		{
+			hp.type |= SPLIT_INDIRECT;
+			wss << std::hex << wsm[1].str();
+			wss >> hp.split_index;
+			std::wstringstream().swap(wss);
+			HCode.erase(0, wsm[0].str().length());
+		}
+	}
+
+	if (HCode.length() < 1 || HCode[0] != L'@') return {};
+	HCode.erase(0, 1);
+
+	std::wregex address(L"^([\\dA-F]+):?");
+	std::regex_search(HCode.cbegin(), HCode.cend(), wsm, address);
+	if (wsm.size() == 0) return {};
+	wss << std::hex << wsm[1].str();
+	wss >> hp.address;
+	std::wstringstream().swap(wss);
+	HCode.erase(0, wsm[0].str().length());
+
+	if (HCode.length())
+	{
+		hp.type |= MODULE_OFFSET;
+		hp.module = Hash(HCode);
+	}
+	if (hp.offset & 0x80000000)
+		hp.offset -= 4;
+	if (hp.split & 0x80000000)
+		hp.split -= 4;
+	return hp;
 }

@@ -4,7 +4,7 @@
 
 node-nexthooker is a Node.js wrapper for NextHooker.
 
-NextHooker is a GUI text hooker based on [Stomp](http://www.hongfire.com/forum/showthread.php/438331-ITHVNR-ITH-with-the-VNR-engine)'s ITHVNR.
+[NextHooker](https://github.com/Artikash/NextHooker) is a GUI text hooker based on [Stomp](http://www.hongfire.com/forum/showthread.php/438331-ITHVNR-ITH-with-the-VNR-engine)'s ITHVNR.
 
 ## **WARNING**
 

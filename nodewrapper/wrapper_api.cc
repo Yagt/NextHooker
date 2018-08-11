@@ -274,3 +274,22 @@ NAN_METHOD(NodeWrapper::DetachProcess)
 	int pid = info[0]->IntegerValue();
 	Host::DetachProcess(pid);
 }
+
+NAN_METHOD(NodeWrapper::InsertHook)
+{
+	Nan::HandleScope scope;
+	if (!info[0]->IsUint32() || !info[1]->IsString()) {
+		info.GetIsolate()->ThrowException(v8::Exception::TypeError(Nan::New("Wrong arguments").ToLocalChecked()));
+	}
+	int pid = info[0]->IntegerValue();
+	v8::String::Utf8Value v8s(info[1]);
+	std::string sHookCode(*v8s);
+	std::wstring wsHookCode(_converter.from_bytes(sHookCode));
+	HookParam toInsert = ParseHCodeWstring(wsHookCode);
+	if (toInsert.type == 0 && toInsert.length_offset == 0)
+	{
+		info.GetIsolate()->ThrowException(v8::Exception::Error(Nan::New("invalid /H code").ToLocalChecked()));
+	}
+	Host::InsertHook(pid, toInsert);
+}
+
