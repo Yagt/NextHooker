@@ -33,4 +33,4 @@ set(CMAKE_CONFIGURATION_TYPES Debug Release)
 
 add_subdirectory(texthook)
 add_subdirectory(vnrhook)
-add_subdirectory(GUI)
+#add_subdirectory(GUI)
