@@ -1,6 +1,6 @@
 {
   "name": "nexthooker",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Update of ITHVNR. Hooks into and extracts text from video games.",
   "main": "./build/Debug/nexthooker.node",
   "scripts": {

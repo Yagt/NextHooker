@@ -10,6 +10,33 @@
 #include <codecvt>
 #include <queue>
 
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+NAN_METHOD(NodeWrapper::Start)
+{
+	Nan::HandleScope scope;
+	Host::Start();
+}
+
+NAN_METHOD(NodeWrapper::Open)
+{
+	Nan::HandleScope scope;
+	Host::Open();
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+Nan::CopyablePersistentTraits<v8::Function>::CopyablePersistent _onProcessAttachFunction;
+Nan::CopyablePersistentTraits<v8::Function>::CopyablePersistent _onProcessDetachFunction;
+Nan::CopyablePersistentTraits<v8::Function>::CopyablePersistent _onThreadCreateFunction;
+Nan::CopyablePersistentTraits<v8::Function>::CopyablePersistent _onThreadRemoveFunction;
+Nan::CopyablePersistentTraits<v8::Function>::CopyablePersistent _onThreadOutputFunction;
+
+
+std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> _converter;
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+
 class mutex
 {
 private:
@@ -40,7 +67,7 @@ std::wstring TextThreadToString(TextThread *thread)
 	wss << thread->Number() << L":"
 		<< tp.pid << L":"
 		<< std::hex << std::uppercase << tp.hook << L":"
-		<< std::hex << std::uppercase << tp.retn << L":" 
+		<< std::hex << std::uppercase << tp.retn << L":"
 		<< std::hex << std::uppercase << tp.spl << L":"
 		<< Host::GetHookName(tp.pid, tp.hook) << L":"
 		<< GenerateHCodeWstring(Host::GetHookParam(tp.pid, tp.hook), tp.pid);
@@ -48,30 +75,31 @@ std::wstring TextThreadToString(TextThread *thread)
 	return wss.str();
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-NAN_METHOD(NodeWrapper::Start)
+v8::Local<v8::Object> TextThreadToV8Object(TextThread *thread)
 {
-	Nan::HandleScope scope;
-	Host::Start();
+	ThreadParameter tp = thread->GetThreadParameter();
+
+	v8::Local<v8::Object> obj = Nan::New<v8::Object>();
+
+	obj->Set(Nan::New("num").ToLocalChecked(), Nan::New((uint32_t)thread->Number()));
+	obj->Set(Nan::New("pid").ToLocalChecked(), Nan::New((uint32_t)tp.pid));
+	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New((uint32_t)tp.hook));
+	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New((uint32_t)tp.retn));
+	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New((uint32_t)tp.spl));
+	obj->Set(Nan::New("name").ToLocalChecked(), Nan::New(_converter.to_bytes(
+		Host::GetHookName(tp.pid, tp.hook)))
+		.ToLocalChecked());
+	obj->Set(Nan::New("hcode").ToLocalChecked(), Nan::New(_converter.to_bytes(
+		GenerateHCodeWstring(Host::GetHookParam(tp.pid, tp.hook), tp.pid)))
+		.ToLocalChecked());
+
+	std::wstring wsTs = TextThreadToString(thread);
+	obj->Set(Nan::New("str").ToLocalChecked(), Nan::New(_converter.to_bytes(
+		wsTs))
+		.ToLocalChecked());
+
+	return obj;
 }
-
-NAN_METHOD(NodeWrapper::Open)
-{
-	Nan::HandleScope scope;
-	Host::Open();
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-Nan::CopyablePersistentTraits<v8::Function>::CopyablePersistent _onProcessAttachFunction;
-Nan::CopyablePersistentTraits<v8::Function>::CopyablePersistent _onProcessDetachFunction;
-Nan::CopyablePersistentTraits<v8::Function>::CopyablePersistent _onThreadCreateFunction;
-Nan::CopyablePersistentTraits<v8::Function>::CopyablePersistent _onThreadRemoveFunction;
-Nan::CopyablePersistentTraits<v8::Function>::CopyablePersistent _onThreadOutputFunction;
-
-
-std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> _converter;
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -127,29 +155,21 @@ void _notifyCallback(CallbackInfo *info)
 		Nan::MakeCallback(Nan::GetCurrentContext()->Global(), Nan::New(_onProcessDetachFunction), 1, argv);
 	}
 		break;
-	case CallbackType::THREAD_CREATE: {
-		//std::cout << "in c++: thread created..." << std::endl;
-
-		std::wstring wsTs = TextThreadToString(info->tt);
-		std::string sTs = _converter.to_bytes(wsTs);
-		v8::Local<v8::Value> argv[] = { Nan::New(sTs).ToLocalChecked() };
+	case CallbackType::THREAD_CREATE: {		
+		v8::Local<v8::Value> argv[] = { TextThreadToV8Object(info->tt) };
 		Nan::MakeCallback(Nan::GetCurrentContext()->Global(), Nan::New(_onThreadCreateFunction), 1, argv);
 	}
 		break;
 	case CallbackType::THREAD_REMOVE: {
-		std::wstring wsTs = TextThreadToString(info->tt);
-		std::string sTs = _converter.to_bytes(wsTs);
-		v8::Local<v8::Value> argv[] = { Nan::New(sTs).ToLocalChecked() };
+		v8::Local<v8::Value> argv[] = { TextThreadToV8Object(info->tt) };
 		Nan::MakeCallback(Nan::GetCurrentContext()->Global(), Nan::New(_onThreadRemoveFunction), 1, argv);
 	}
 		break;
 	case CallbackType::THREAD_OUTPUT: {
-		std::wstring wsOut = TextThreadToString(info->tt);
-		std::string sTsOut = _converter.to_bytes(wsOut);
 		std::string sOutput = _converter.to_bytes(info->output);
 
 		v8::Local<v8::Value> argv[] = {
-			Nan::New(sTsOut).ToLocalChecked(),
+			TextThreadToV8Object(info->tt),
 			Nan::New(sOutput).ToLocalChecked()
 		};
 		Nan::MakeCallback(Nan::GetCurrentContext()->Global(), Nan::New(_onThreadOutputFunction), 2, argv);
@@ -292,4 +312,3 @@ NAN_METHOD(NodeWrapper::InsertHook)
 	}
 	Host::InsertHook(pid, toInsert);
 }
-

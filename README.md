@@ -47,10 +47,10 @@ if you see an error with *node-gyp rebuild*, don't worry.
     hooker.onProcessDetach((pid) => { console.log(`process detached: ${pid}`) })
     hooker.onProcessAttach((pid) => { console.log(`process attached: ${pid}`) })
     hooker.onThreadCreate(
-        (ts) => { console.log(`thread create: ${ts}`) },
-        (ts, text) => { console.log(`get text '${text}' from thread: ${ts}`) }
+        (thread) => { console.log(`thread create: ${JSON.stringify(thread)}`) },
+        (thread, text) => { console.log(`get text '${text}' from thread: ${JSON.stringify(thread)}`) }
     )
-    hooker.onThreadRemove((ts) => { console.log(`thread removed: ${ts}`) })
+    hooker.onThreadRemove((thread) => { console.log(`thread removed: ${JSON.stringify(thread)}`) })
     hooker.open()
     hooker.injectProcess(parseInt(process.argv[2]))
     /* index.js */
@@ -86,10 +86,10 @@ or
     hooker.onProcessDetach((pid) => { console.log(`process detached: ${pid}`) })
     hooker.onProcessAttach((pid) => { console.log(`process attached: ${pid}`) })
     hooker.onThreadCreate(
-        (ts) => { console.log(`thread create: ${ts}`) },
-        (ts, text) => { console.log(`get text '${text}' from thread: ${ts}`) }
+        (thread) => { console.log(`thread create: ${JSON.stringify(thread)}`) },
+        (thread, text) => { console.log(`get text '${text}' from thread: ${JSON.stringify(thread)}`) }
     )
-    hooker.onThreadRemove((ts) => { console.log(`thread removed: ${ts}`) })
+    hooker.onThreadRemove((thread) => { console.log(`thread removed: ${JSON.stringify(thread)}`) })
     hooker.open()
     hooker.injectProcess(parseInt(process.argv[2]))
     /* index.js */
