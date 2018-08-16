@@ -101,6 +101,21 @@ v8::Local<v8::Object> TextThreadToV8Object(TextThread *thread)
 	return obj;
 }
 
+v8::Local<v8::Object> RemovedTextThreadToV8Object(TextThread *thread)
+{
+	ThreadParameter tp = thread->GetThreadParameter();
+
+	v8::Local<v8::Object> obj = Nan::New<v8::Object>();
+
+	obj->Set(Nan::New("num").ToLocalChecked(), Nan::New((uint32_t)thread->Number()));
+	obj->Set(Nan::New("pid").ToLocalChecked(), Nan::New((uint32_t)tp.pid));
+	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New((uint32_t)tp.hook));
+	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New((uint32_t)tp.retn));
+	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New((uint32_t)tp.spl));
+
+	return obj;
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 enum CallbackType
@@ -161,7 +176,7 @@ void _notifyCallback(CallbackInfo *info)
 	}
 		break;
 	case CallbackType::THREAD_REMOVE: {
-		v8::Local<v8::Value> argv[] = { TextThreadToV8Object(info->tt) };
+		v8::Local<v8::Value> argv[] = { RemovedTextThreadToV8Object(info->tt) };
 		Nan::MakeCallback(Nan::GetCurrentContext()->Global(), Nan::New(_onThreadRemoveFunction), 1, argv);
 	}
 		break;
@@ -176,7 +191,6 @@ void _notifyCallback(CallbackInfo *info)
 	}
 		break;
 	default: {
-		//std::cout << "c++: error callback not handled" << std::endl;
 	}
 		break;
 	}
@@ -241,7 +255,6 @@ NAN_METHOD(NodeWrapper::OnThreadCreate)
 		_callbackInfos.push(newInfo);
 
 		thread->RegisterOutputCallBack([&](TextThread* threadOut, std::wstring output) {
-			//std::cout << "in c++: thread output..." << std::endl;
 			CallbackInfo *newInfo = new CallbackInfo;
 			newInfo->type = CallbackType::THREAD_OUTPUT;
 			newInfo->tt = threadOut;
@@ -281,7 +294,6 @@ NAN_METHOD(NodeWrapper::InjectProcess)
 	Nan::HandleScope scope;
 
 	uv_async_init(uv_default_loop(), &_async, _callbackHandler);
-	//uv_async_init(uv_default_loop(), &_async_output, _callbackHandler);
 
 	int pid = info[0]->IntegerValue();
 	Host::InjectProcess(pid);
@@ -311,4 +323,15 @@ NAN_METHOD(NodeWrapper::InsertHook)
 		info.GetIsolate()->ThrowException(v8::Exception::Error(Nan::New("invalid /H code").ToLocalChecked()));
 	}
 	Host::InsertHook(pid, toInsert);
+}
+
+NAN_METHOD(NodeWrapper::RemoveHook)
+{
+	Nan::HandleScope scope;
+	if (!info[0]->IsUint32() || !info[1]->IsUint32()) {
+		info.GetIsolate()->ThrowException(v8::Exception::TypeError(Nan::New("Wrong arguments").ToLocalChecked()));
+	}
+	int pid = info[0]->IntegerValue();
+	int addr = info[1]->IntegerValue();
+	Host::RemoveHook(pid, addr);
 }
