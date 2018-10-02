@@ -24,44 +24,6 @@ std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> _converter;
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-class mutex
-{
-private:
-	CRITICAL_SECTION _criticalSection;
-public:
-	mutex() { InitializeCriticalSection(&_criticalSection); }
-	~mutex() { DeleteCriticalSection(&_criticalSection); }
-	inline void lock() { EnterCriticalSection(&_criticalSection); }
-	inline void unlock() { LeaveCriticalSection(&_criticalSection); }
-
-	class scoped_lock
-	{
-	public:
-		inline explicit scoped_lock(mutex & sp) : _sl(sp) { _sl.lock(); }
-		inline ~scoped_lock() { _sl.unlock(); }
-	private:
-		scoped_lock(scoped_lock const &);
-		scoped_lock & operator=(scoped_lock const &);
-		mutex& _sl;
-	};
-};
-
-std::wstring TextThreadToString(TextThread *thread)
-{
-	ThreadParam tp = thread->tp;
-
-	std::wstringstream wss;
-	wss << thread->handle << L":"
-		<< tp.pid << L":"
-		<< std::hex << std::uppercase << tp.hook << L":"
-		<< std::hex << std::uppercase << tp.retn << L":"
-		<< std::hex << std::uppercase << tp.spl << L":"
-		<< Host::GetHookName(tp.pid, tp.hook) << L":"
-		<< GenerateHCodeWstring(Host::GetHookParam(tp.pid, tp.hook), tp.pid);
-
-	return wss.str();
-}
-
 v8::Local<v8::Object> TextThreadToV8Object(TextThread *thread)
 {
 	ThreadParam tp = thread->tp;
@@ -121,26 +83,23 @@ void _notifyCallback(CallbackInfo *info);
 
 uv_async_t _async;
 
-mutex _queueMutex;
+std::mutex _queueMutex;
 std::queue<CallbackInfo *> _callbackInfos;
 
 void _callbackHandler(uv_async_t *handle)
 {
-	mutex::scoped_lock sl(_queueMutex);
-
 	Nan::HandleScope scope;
 	CallbackInfo *info;
 
+	_queueMutex.lock();
 	while (!_callbackInfos.empty()) {
 		info = _callbackInfos.front();
-		if (info->type < 0 || info->type > 4) {
-			_callbackInfos.pop();
-			break;
-		}
 		_notifyCallback(info);
 		delete info;
+		info = nullptr;
 		_callbackInfos.pop();
 	}
+	_queueMutex.unlock();
 }
 
 void _notifyCallback(CallbackInfo *info)
@@ -232,6 +191,8 @@ NAN_METHOD(NodeWrapper::OnThreadRemove)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
+std::mutex _callbackMutex;
+
 NAN_METHOD(NodeWrapper::Start)
 {
 	Nan::HandleScope scope;
@@ -240,21 +201,27 @@ NAN_METHOD(NodeWrapper::Start)
 		CallbackInfo *newInfo = new CallbackInfo;
 		newInfo->type = CallbackType::PROCESS_ATTACH;
 		newInfo->pid = pid;
+		_callbackMutex.lock();
 		_callbackInfos.push(newInfo);
+		_callbackMutex.unlock();
 		uv_async_send(&_async);
 	}, 
 	[&](DWORD pid) {
 		CallbackInfo *newInfo = new CallbackInfo;
 		newInfo->type = CallbackType::PROCESS_DETACH;
 		newInfo->pid = pid;
+		_callbackMutex.lock();
 		_callbackInfos.push(newInfo);
+		_callbackMutex.unlock();
 		uv_async_send(&_async);
 	}, 
 	[&](TextThread* thread) {
 		CallbackInfo *newInfo = new CallbackInfo;
 		newInfo->type = CallbackType::THREAD_CREATE;
 		newInfo->tt = thread;
+		_callbackMutex.lock();
 		_callbackInfos.push(newInfo);
+		_callbackMutex.unlock();
 		uv_async_send(&_async);
 
 		thread->RegisterOutputCallBack([&](TextThread* threadOut, std::wstring output) {
@@ -262,7 +229,9 @@ NAN_METHOD(NodeWrapper::Start)
 			newInfo->type = CallbackType::THREAD_OUTPUT;
 			newInfo->tt = threadOut;
 			newInfo->output = output;
+			_callbackMutex.lock();
 			_callbackInfos.push(newInfo);
+			_callbackMutex.unlock();
 			uv_async_send(&_async);
 			return output;
 		});
@@ -271,7 +240,9 @@ NAN_METHOD(NodeWrapper::Start)
 		CallbackInfo *newInfo = new CallbackInfo;
 		newInfo->type = CallbackType::THREAD_REMOVE;
 		newInfo->tt = thread;
+		_callbackMutex.lock();
 		_callbackInfos.push(newInfo);
+		_callbackMutex.unlock();
 		uv_async_send(&_async);
 	});
 }

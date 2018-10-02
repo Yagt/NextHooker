@@ -1,6 +1,6 @@
 {
   "name": "nexthooker",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Textractor (a.k.a. NextHooker) is an open-source x86/x64 text hooker for Windows/Wine based off of ITHVNR.",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
