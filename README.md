@@ -1,4 +1,4 @@
-# NextHooker Node.js Addon
+# Textractor Node.js Addon
 
 ## Overview
 

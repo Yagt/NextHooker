@@ -1,8 +1,7 @@
 {
   "name": "nexthooker",
-  "version": "1.3.0",
-  "description": "Update of ITHVNR. Hooks into and extracts text from video games.",
-  "main": "./build/Debug/nexthooker.node",
+  "version": "2.0.0",
+  "description": "Textractor (a.k.a. NextHooker) is an open-source x86/x64 text hooker for Windows/Wine based off of ITHVNR.",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
