@@ -73,16 +73,11 @@ v8::Local<v8::Object> TextThreadToV8Object(TextThread *thread)
 	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New(static_cast<double>(tp.hook)));
 	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New(static_cast<double>(tp.retn)));
 	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New(static_cast<double>(tp.spl)));
-	obj->Set(Nan::New("name").ToLocalChecked(), Nan::New(_converter.to_bytes(
-		Host::GetHookName(tp.pid, tp.hook)))
-		.ToLocalChecked());
+	std::string sName = _converter.to_bytes(Host::GetHookName(tp.pid, tp.hook));
+	sName.pop_back();
+	obj->Set(Nan::New("name").ToLocalChecked(), Nan::New(sName).ToLocalChecked());
 	obj->Set(Nan::New("hcode").ToLocalChecked(), Nan::New(_converter.to_bytes(
 		GenerateHCodeWstring(Host::GetHookParam(tp.pid, tp.hook), tp.pid)))
-		.ToLocalChecked());
-
-	std::wstring wsTs = TextThreadToString(thread);
-	obj->Set(Nan::New("str").ToLocalChecked(), Nan::New(_converter.to_bytes(
-		wsTs))
 		.ToLocalChecked());
 
 	return obj;
@@ -131,12 +126,17 @@ std::queue<CallbackInfo *> _callbackInfos;
 
 void _callbackHandler(uv_async_t *handle)
 {
+	mutex::scoped_lock sl(_queueMutex);
+
 	Nan::HandleScope scope;
 	CallbackInfo *info;
 
-	mutex::scoped_lock sl(_queueMutex);
 	while (!_callbackInfos.empty()) {
 		info = _callbackInfos.front();
+		if (info->type < 0 || info->type > 4) {
+			_callbackInfos.pop();
+			break;
+		}
 		_notifyCallback(info);
 		delete info;
 		_callbackInfos.pop();

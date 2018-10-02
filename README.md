@@ -24,18 +24,18 @@ if you see an error with _node-gyp rebuild_, don't worry.
     cd .\node_modules\nexthooker
 
 1. Open CMakeLists.txt from Visual Studio
-2. Change build option to x86-Release
+2. Change build option to x86-Debug
 3. CMake -> Generate All
 
 ### Rebuild for Electron
 
     npm install -g node-gyp
-    node-gyp rebuild --target=<ELECTRON_VERSION> --arch=ia32 --dist-url=https://atom.io/download/electron
+    node-gyp rebuild --target=<ELECTRON_VERSION> --arch=ia32 --dist-url=https://atom.io/download/electron --debug
 
 ### Copy Library to ROOT Folder (IMPORTANT)
 
-    cp .\Builds\x86-Release\Build\vnrhook.dll ..\..
-    cp .\build\Release\nexthooker.node ..\..
+    cp .\Builds\x86-Debug\Build\vnrhook.dll ..\..
+    cp .\build\Debug\nexthooker.node ..\..
 
 ### Create test program
 
@@ -68,18 +68,18 @@ or
 ### Build library
 
 1. Open CMakeLists.txt from Visual Studio
-2. Change build option to x86-Release
+2. Change build option to x86-Debug
 3. CMake -> Generate All
 
 ### Rebuild addon
 
     npm install -g node-gyp
-    node-gyp rebuild
+    node-gyp rebuild --debug
 
 ### Copy Library to ROOT Folder (IMPORTANT)
 
-    cp .\Builds\x86-Release\Build\vnrhook.dll .
-    cp .\build\Release\nexthooker.node .
+    cp .\Builds\x86-Debug\Build\vnrhook.dll .
+    cp .\build\Debug\nexthooker.node .
 
 ### Create test program
 
