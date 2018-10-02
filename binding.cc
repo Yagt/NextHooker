@@ -12,8 +12,6 @@ using Nan::Set;
 NAN_MODULE_INIT(InitAll) {
 	Set(target, New<String>("start").ToLocalChecked(),
 		GetFunction(New<FunctionTemplate>(NodeWrapper::Start)).ToLocalChecked());
-	Set(target, New<String>("open").ToLocalChecked(),
-		GetFunction(New<FunctionTemplate>(NodeWrapper::Open)).ToLocalChecked());
 	Set(target, New<String>("onProcessAttach").ToLocalChecked(),
 		GetFunction(New<FunctionTemplate>(NodeWrapper::OnProcessAttach)).ToLocalChecked());
 	Set(target, New<String>("onProcessDetach").ToLocalChecked(),

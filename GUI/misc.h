@@ -1,18 +1,23 @@
 #ifndef MISC_H
 #define MISC_H
 
-#include <QString>
-#include <Windows.h>
-#include "../texthook/host.h"
+#include "qtcommon.h"
+#include "types.h"
+#include <QHash>
+#include <optional>
 
 QString GetFullModuleName(DWORD processId, HMODULE module = NULL);
 QString GetModuleName(DWORD processId, HMODULE module = NULL);
-QStringList GetAllProcesses();
-HookParam ParseHCode(QString HCode);
-QString GenerateHCode(HookParam hp, DWORD processId);
+QMultiHash<QString, DWORD> GetAllProcesses();
+std::optional<HookParam> ParseCode(QString HCode);
+QString GenerateCode(HookParam hp, DWORD processId);
 
-static QString HCodeInfoDump =
-"Enter hook code\r\n /H{A|B|W|S|Q|V}[N]data_offset[*deref_offset1][:split_offset[*deref_offset2]]@addr[:module]\r\n\
+static QString CodeInfoDump =
+"Enter hook code\r\n\
+/H{A|B|W|S|Q|V}[N]data_offset[*deref_offset1][:split_offset[*deref_offset2]]@addr[:module]\r\n\
+OR\r\n\
+Enter read code\r\n\
+/R{S|Q|V}[*deref_offset|0]@addr\r\n\
 All numbers in hexadecimal\r\n\
 A/B: Shift-JIS char little/big endian\r\n\
 W: UTF-16 char\r\n\

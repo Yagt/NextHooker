@@ -1,22 +1,18 @@
 #ifndef EXTENSIONS_H
 #define EXTENSIONS_H
 
-#include <Windows.h>
-#include <string>
+#include "qtcommon.h"
 #include <map>
-#include <unordered_map>
-#include <vector>
-#include <QComboBox>
 
 std::map<int, QString> LoadExtensions();
-std::wstring DispatchSentenceToExtensions(std::wstring sentence, std::unordered_map<std::string, int> miscInfo);
+bool DispatchSentenceToExtensions(std::wstring& sentence, std::unordered_map<std::string, int64_t> miscInfo);
 struct InfoForExtension
 {
-	char* propertyName;
-	int propertyValue;
-	InfoForExtension* nextProperty;
+	~InfoForExtension() { if (nextProperty) delete nextProperty; };
+	const char* propertyName = "";
+	int64_t propertyValue = 0;
+	InfoForExtension* nextProperty = nullptr;
 };
-typedef const wchar_t*(*ExtensionFunction)(const wchar_t*, const InfoForExtension*);
-extern QComboBox* ttCombo;
+typedef wchar_t*(*ExtensionFunction)(const wchar_t*, const InfoForExtension*);
 
 #endif // EXTENSIONS_H

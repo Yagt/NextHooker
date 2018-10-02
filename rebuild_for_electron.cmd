@@ -1,1 +1,1 @@
-@node-gyp rebuild --target=2.0.6 --arch=ia32 --dist-url=https://atom.io/download/electron --debug
+@node-gyp rebuild --target=1.7.5 --arch=ia32 --dist-url=https://atom.io/download/electron

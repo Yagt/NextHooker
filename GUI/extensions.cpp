@@ -1,74 +1,52 @@
 #include "extensions.h"
-#include <map>
+#include <shared_mutex>
 #include <QDir>
 
+std::shared_mutex extenMutex;
 std::map<int, ExtensionFunction> extensions;
-int processing;
 
 std::map<int, QString> LoadExtensions()
 {
 	std::map<int, ExtensionFunction> newExtensions;
 	std::map<int, QString> extensionNames;
-	wchar_t path[MAX_PATH] = {};
-	(QDir::currentPath() + "/*_nexthooker_extension.dll").toWCharArray(path);
-	WIN32_FIND_DATAW fileData;
-	HANDLE file = FindFirstFileW(path, &fileData);
-	do
-		if (GetProcAddress(GetModuleHandleW(fileData.cFileName), "OnNewSentence") ||
-			GetProcAddress(LoadLibraryW(fileData.cFileName), "OnNewSentence")
-		)
-		{
-			newExtensions[std::wcstol(fileData.cFileName, nullptr, 10)] = (ExtensionFunction)GetProcAddress(GetModuleHandleW(fileData.cFileName), "OnNewSentence");
-			QString name = QString::fromWCharArray(fileData.cFileName);
-			name.chop(sizeof("_nexthooker_extension.dll") - 1);
-			name.remove(0, name.split("_")[0].length() + 1);
-			extensionNames[std::wcstol(fileData.cFileName, nullptr, 10)] = name;
-		}
-	while (FindNextFileW(file, &fileData) != 0);
-	while (processing) Sleep(10);
-	processing = -1;
+	QStringList files = QDir().entryList();
+	for (auto file : files)
+		if (file.split("_").size() > 1 && file.split("_")[0].toInt() && file.endsWith(".dll"))
+			if (GetProcAddress(GetModuleHandleW(file.toStdWString().c_str()), "OnNewSentence") ||
+				GetProcAddress(LoadLibraryW(file.toStdWString().c_str()), "OnNewSentence"))
+			{
+				int extensionNumber = file.split("_")[0].toInt();
+				newExtensions[extensionNumber] = (ExtensionFunction)GetProcAddress(GetModuleHandleW(file.toStdWString().c_str()), "OnNewSentence");
+				file.chop(sizeof("dll"));
+				extensionNames[extensionNumber] = file.split("_")[1];
+			}
+	extenMutex.lock();
 	extensions = newExtensions;
-	processing = 0;
+	extenMutex.unlock();
 	return extensionNames;
 }
 
-std::wstring DispatchSentenceToExtensions(std::wstring sentence, std::unordered_map<std::string, int> miscInfo)
+bool DispatchSentenceToExtensions(std::wstring& sentence, std::unordered_map<std::string, int64_t> miscInfo)
 {
-	while (processing < 0) Sleep(10);
-	processing++;
-	wchar_t* sentenceOrigBuffer = (wchar_t*)malloc((sentence.size() + 1) * sizeof(wchar_t));
-	wcscpy(sentenceOrigBuffer, sentence.c_str());
-	const wchar_t* sentenceBuffer = sentenceOrigBuffer;
+	wchar_t* sentenceBuffer = (wchar_t*)malloc((sentence.size() + 1) * sizeof(wchar_t));
+	wcscpy_s(sentenceBuffer, sentence.size() + 1, sentence.c_str());
 	InfoForExtension* miscInfoLinkedList = new InfoForExtension;
 	InfoForExtension* miscInfoTraverser = miscInfoLinkedList;
-	for (auto i : miscInfo)
+	for (auto& i : miscInfo) miscInfoTraverser = miscInfoTraverser->nextProperty = new InfoForExtension{ i.first.c_str(), i.second, nullptr };
+	extenMutex.lock_shared();
+	try
 	{
-		miscInfoTraverser->propertyName = new char[i.first.size() + 1];
-		strcpy(miscInfoTraverser->propertyName, i.first.c_str());
-		miscInfoTraverser->propertyValue = i.second;
-		miscInfoTraverser->nextProperty = new InfoForExtension;
-		miscInfoTraverser = miscInfoTraverser->nextProperty;
+		for (auto i : extensions)
+		{
+			wchar_t* prev = sentenceBuffer;
+			sentenceBuffer = i.second(sentenceBuffer, miscInfoLinkedList);
+			if (sentenceBuffer != prev) free((void*)prev);
+		}
 	}
-	miscInfoTraverser->propertyName = new char[sizeof("END")];
-	strcpy(miscInfoTraverser->propertyName, "END");
-	miscInfoTraverser->nextProperty = nullptr;
-	for (auto i : extensions)
-	{
-		const wchar_t* prev = sentenceBuffer;
-		sentenceBuffer = i.second(sentenceBuffer, miscInfoLinkedList);
-		if (sentenceBuffer == nullptr) sentence = prev;
-		if (sentenceBuffer != prev) free((void*)prev);
-	}
-	miscInfoTraverser = miscInfoLinkedList;
-	while (miscInfoTraverser != nullptr)
-	{
-		InfoForExtension* nextNode = miscInfoTraverser->nextProperty;
-		delete[] miscInfoTraverser->propertyName;
-		delete miscInfoTraverser;
-		miscInfoTraverser = nextNode;
-	}
-	std::wstring newSentence = std::wstring(sentenceBuffer);
+	catch (...) { sentenceBuffer[0] = 0; }
+	extenMutex.unlock_shared();
+	delete miscInfoLinkedList;
+	sentence = std::wstring(sentenceBuffer);
 	free((void*)sentenceBuffer);
-	processing--;
-	return newSentence;
+	return sentence.size() > 0;
 }

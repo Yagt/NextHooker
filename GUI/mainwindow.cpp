@@ -1,140 +1,105 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
-#include <QCoreApplication>
-#include "QTextBrowser"
-#include "QMessageBox"
-#include "QComboBox"
-#include "QLineEdit"
-#include "QInputDialog"
-#include <QCursor>
-#include <Qt>
-#include <QPlainTextEdit>
-#include <QDateTime>
-#include <QFileDialog>
-#include <unordered_set>
-#include <map>
-#include <unordered_map>
-#include <Windows.h>
-#include <qdebug.h>
-#include <Psapi.h>
 #include "extensions.h"
-#include "../vnrhook/include/const.h"
 #include "misc.h"
-
-QMainWindow* mainWindow;
-QComboBox* processCombo;
-QComboBox* ttCombo;
-QComboBox* extenCombo;
-QPlainTextEdit* textOutput;
-
-QString ProcessString(DWORD processId)
-{
-	return QString("%1: %2").arg(QString::number(processId), GetModuleName(processId));
-}
-
-QString TextThreadString(TextThread* thread)
-{
-	ThreadParameter tp = thread->GetThreadParameter();
-	return QString("%1:%2:%3:%4:%5: ").arg(
-		QString::number(thread->Number()),
-		QString::number(tp.pid),
-		QString::number(tp.hook, 16),
-		QString::number(tp.retn, 16),
-		QString::number(tp.spl, 16)
-	).toUpper();
-}
+#include <QCoreApplication>
+#include <QInputDialog>
+#include <QFileDialog>
 
 MainWindow::MainWindow(QWidget *parent) :
 	QMainWindow(parent),
-	ui(new Ui::MainWindow),
-	hostSignaller(new HostSignaller)
+	ui(new Ui::MainWindow)
 {
 	ui->setupUi(this);
-	mainWindow = this;
-	processCombo = mainWindow->findChild<QComboBox*>("processCombo");
-	processCombo->lineEdit()->setAlignment(Qt::AlignHCenter);
-	processCombo->lineEdit()->setReadOnly(true);
-	ttCombo = mainWindow->findChild<QComboBox*>("ttCombo");
-	ttCombo->lineEdit()->setAlignment(Qt::AlignHCenter);
-	ttCombo->lineEdit()->setReadOnly(true);
-	extenCombo = mainWindow->findChild<QComboBox*>("extenCombo");
-	extenCombo->lineEdit()->setAlignment(Qt::AlignHCenter);
-	extenCombo->lineEdit()->setReadOnly(true);
-	textOutput = mainWindow->findChild<QPlainTextEdit*>("textOutput");
+	if (settings.contains("Window")) this->setGeometry(settings.value("Window").toRect());
+	// TODO: add GUI for changing these
+	if (settings.contains("Flush_Delay")) TextThread::FlushDelay = settings.value("Flush_Delay").toInt();
+	if (settings.contains("Max_Buffer_Size")) TextThread::MaxBufferSize = settings.value("Max_Buffer_Size").toInt();
 
-	hostSignaller->Initialize();
-	connect(hostSignaller, &HostSignaller::AddProcess, this, &MainWindow::AddProcess);
-	connect(hostSignaller, &HostSignaller::RemoveProcess, this, &MainWindow::RemoveProcess);
-	connect(hostSignaller, &HostSignaller::AddThread, this, &MainWindow::AddThread);
-	connect(hostSignaller, &HostSignaller::RemoveThread, this, &MainWindow::RemoveThread);
-	connect(this, &MainWindow::ThreadOutputReceived, this, &MainWindow::ThreadOutput);
-	std::map<int, QString> extensions = LoadExtensions();
-	for (auto i : extensions) extenCombo->addItem(QString::number(i.first) + ":" + i.second);
-	Host::Open();
-	Host::AddConsoleOutput(L"NextHooker beta v2.0.1 by Artikash\r\nSource code and more information available under GPLv3 at https://github.com/Artikash/NextHooker");
+	processCombo = findChild<QComboBox*>("processCombo");
+	ttCombo = findChild<QComboBox*>("ttCombo");
+	extenCombo = findChild<QComboBox*>("extenCombo");
+	textOutput = findChild<QPlainTextEdit*>("textOutput");
+
+	connect(this, &MainWindow::SigAddProcess, this, &MainWindow::AddProcess);
+	connect(this, &MainWindow::SigRemoveProcess, this, &MainWindow::RemoveProcess);
+	connect(this, &MainWindow::SigAddThread, this, &MainWindow::AddThread);
+	connect(this, &MainWindow::SigRemoveThread, this, &MainWindow::RemoveThread);
+	connect(this, &MainWindow::SigThreadOutput, this, &MainWindow::ThreadOutput);
+	Host::Start(
+		[&](DWORD processId) { emit SigAddProcess(processId); },
+		[&](DWORD processId) { emit SigRemoveProcess(processId); },
+		[&](TextThread* thread) { emit SigAddThread(thread); },
+		[&](TextThread* thread) { emit SigRemoveThread(thread); }
+	);
+
+	ReloadExtensions();
+	Host::AddConsoleOutput(L"Textractor beta v3.2.2 by Artikash\r\nSource code and more information available under GPLv3 at https://github.com/Artikash/Textractor");
 }
 
 MainWindow::~MainWindow()
 {
+	settings.setValue("Window", this->geometry());
+	settings.setValue("Flush_Delay", TextThread::FlushDelay);
+	settings.setValue("Max_Buffer_Size", TextThread::MaxBufferSize);
+	settings.sync();
+	Host::Close();
 	delete ui;
 }
 
 void MainWindow::AddProcess(unsigned int processId)
 {
-	processCombo->addItem(ProcessString(processId));
+	processCombo->addItem(QString::number(processId, 16).toUpper() + ": " + GetModuleName(processId));
 	QFile file("SavedHooks.txt");
 	if (!file.open(QIODevice::ReadOnly)) return;
 	QString processName = GetFullModuleName(processId);
 	QString allData = file.readAll();
 	QStringList allProcesses = allData.split("\r", QString::SkipEmptyParts);
-	for (int i = allProcesses.length() - 1; i >= 0; --i)
-		if (allProcesses.at(i).contains(processName))
+	for (int i = allProcesses.size() - 1; i >= 0; --i)
+		if (allProcesses[i].contains(processName))
 		{
-			Sleep(50);
-			QStringList hooks = allProcesses.at(i).split(" , ");
-			for (int j = 1; j < hooks.length(); ++j)
-			{
-				Sleep(10);
-				Host::InsertHook(processId, ParseHCode(hooks.at(j)));
-			}
+			QStringList hooks = allProcesses[i].split(" , ");
+			for (int j = 1; j < hooks.size(); ++j)
+				Host::InsertHook(processId, ParseCode(hooks[j]).value_or(HookParam()));
 			return;
 		}
 }
 
 void MainWindow::RemoveProcess(unsigned int processId)
 {
-	processCombo->removeItem(processCombo->findText(QString::number(processId) + ":", Qt::MatchStartsWith));
+	processCombo->removeItem(processCombo->findText(QString::number(processId, 16).toUpper() + ":", Qt::MatchStartsWith));
 }
 
 void MainWindow::AddThread(TextThread* thread)
 {
 	ttCombo->addItem(
 		TextThreadString(thread) +
-		QString::fromWCharArray(Host::GetHookName(thread->GetThreadParameter().pid, thread->GetThreadParameter().hook).c_str()) +
+		QString::fromStdWString(thread->name) +
 		" (" +
-		GenerateHCode(Host::GetHookParam(thread->GetThreadParameter().pid, thread->GetThreadParameter().hook), thread->GetThreadParameter().pid) +
+		GenerateCode(Host::GetHookParam(thread->tp), thread->tp.pid) +
 		")"
 	);
 	thread->RegisterOutputCallBack([&](TextThread* thread, std::wstring output)
 	{
-		output = DispatchSentenceToExtensions(output,
-			{
-				{ "current select", ttCombo->currentText().split(":")[0].toInt() == thread->Number() ? 1 : 0 }
-			});
-		emit ThreadOutputReceived(thread, QString::fromWCharArray(output.c_str()));
+		if (DispatchSentenceToExtensions(output, GetInfoForExtensions(thread)))
+		{
+			output += L"\r\n";
+			emit SigThreadOutput(thread, QString::fromStdWString(output));
+		}
 		return output;
 	});
 }
 
 void MainWindow::RemoveThread(TextThread* thread)
 {
-	int threadIndex = ttCombo->findText(QString::number(thread->Number()) + ":", Qt::MatchStartsWith);
+	int threadIndex = ttCombo->findText(TextThreadString(thread), Qt::MatchStartsWith);
 	if (threadIndex == ttCombo->currentIndex())
 	{
 		ttCombo->setCurrentIndex(0);
 		on_ttCombo_activated(0);
 	}
 	ttCombo->removeItem(threadIndex);
+	delete thread;
 }
 
 void MainWindow::ThreadOutput(TextThread* thread, QString output)
@@ -147,70 +112,121 @@ void MainWindow::ThreadOutput(TextThread* thread, QString output)
 	}
 }
 
+QString MainWindow::TextThreadString(TextThread* thread)
+{
+	ThreadParam tp = thread->tp;
+	return QString("%1:%2:%3:%4:%5: ").arg(
+		QString::number(thread->handle, 16),
+		QString::number(tp.pid, 16),
+		QString::number(tp.hook, 16),
+		QString::number(tp.retn, 16),
+		QString::number(tp.spl, 16)
+	).toUpper();
+}
+
+ThreadParam MainWindow::ParseTextThreadString(QString textThreadString)
+{
+	QStringList threadParam = textThreadString.split(":");
+	return { threadParam[1].toUInt(nullptr, 16), threadParam[2].toULongLong(nullptr, 16), threadParam[3].toULongLong(nullptr, 16), threadParam[4].toULongLong(nullptr, 16) };
+}
+
+DWORD MainWindow::GetSelectedProcessId()
+{
+	return processCombo->currentText().split(":")[0].toULong(nullptr, 16);
+}
+
+void MainWindow::ReloadExtensions()
+{
+	extenCombo->clear();
+	std::map<int, QString> extensions = LoadExtensions();
+	for (auto i : extensions) extenCombo->addItem(QString::number(i.first) + ": " + i.second);
+}
+
+std::unordered_map<std::string, int64_t> MainWindow::GetInfoForExtensions(TextThread* thread)
+{
+	return 
+	{
+	{ "current select", ttCombo->currentText().startsWith(TextThreadString(thread)) },
+	{ "text number", thread->handle },
+	{ "process id", thread->tp.pid },
+	{ "hook address", thread->tp.hook },
+	{ "text handle", thread->handle },
+	{ "text name", (int64_t)thread->name.c_str() }
+	};
+}
+
 QVector<HookParam> MainWindow::GetAllHooks(DWORD processId)
 {
-	std::unordered_set<DWORD> addresses;
+	QSet<DWORD> addresses;
 	QVector<HookParam> hooks;
 	for (int i = 0; i < ttCombo->count(); ++i)
-		if (ttCombo->itemText(i).split(":")[1].toInt() == processId &&
-				!addresses.count(ttCombo->itemText(i).split(":")[2].toInt(nullptr, 16)))
+	{
+		ThreadParam tp = ParseTextThreadString(ttCombo->itemText(i));
+		if (tp.pid == processId && !addresses.contains(tp.hook))
 		{
-			addresses.insert(ttCombo->itemText(i).split(":")[2].toInt(nullptr, 16));
-			hooks.push_back(Host::GetHookParam(ttCombo->itemText(i).split(":")[1].toInt(), ttCombo->itemText(i).split(":")[2].toInt(nullptr, 16)));
+			addresses.insert(tp.hook);
+			hooks.push_back(Host::GetHookParam(tp));
 		}
+	}
 	return hooks;
 }
 
 void MainWindow::on_attachButton_clicked()
 {
+	QMultiHash<QString, DWORD> allProcesses = GetAllProcesses();
+	QStringList processList(allProcesses.uniqueKeys());
+	processList.sort(Qt::CaseInsensitive);
 	bool ok;
 	QString process = QInputDialog::getItem(this, "Select Process",
-		"If you don't see the process you want to inject, try running with admin rights",
-		GetAllProcesses(), 0, true, &ok);
+		"If you don't see the process you want to inject, try running with admin rights\r\nYou can also type in the process id if you know it",
+		processList, 0, true, &ok);
+	bool injected = false;
 	if (!ok) return;
-	if (!Host::InjectProcess(process.split(":")[1].toInt())) Host::AddConsoleOutput(L"Failed to attach");
+	if (process.toInt(nullptr, 0)) injected |= Host::InjectProcess(process.toInt(nullptr, 0));
+	else for (auto i : allProcesses.values(process)) injected |= Host::InjectProcess(i);
+	if (!injected) Host::AddConsoleOutput(L"failed to inject");
 }
 
 void MainWindow::on_detachButton_clicked()
 {
-	Host::DetachProcess(processCombo->currentText().split(":")[0].toInt());
+	Host::DetachProcess(GetSelectedProcessId());
 }
 
 void MainWindow::on_hookButton_clicked()
 {
 	bool ok;
-	QString hookCode = QInputDialog::getText(this, "Add Hook", HCodeInfoDump, QLineEdit::Normal, "/H", &ok);
+	QString hookCode = QInputDialog::getText(this, "Add Hook", CodeInfoDump, QLineEdit::Normal, "", &ok);
 	if (!ok) return;
-	HookParam toInsert = ParseHCode(hookCode);
-	if (toInsert.type == 0 && toInsert.length_offset == 0)
-	{
-		Host::AddConsoleOutput(L"invalid /H code");
-		return;
-	}
-	Host::InsertHook(processCombo->currentText().split(":")[0].toInt(), ParseHCode(hookCode));
+	if (auto hp = ParseCode(hookCode)) Host::InsertHook(GetSelectedProcessId(), hp.value());
+	else Host::AddConsoleOutput(L"invalid code");
 }
 
 void MainWindow::on_unhookButton_clicked()
 {
-	QVector<HookParam> hooks = GetAllHooks(processCombo->currentText().split(":")[0].toInt());
+	QVector<HookParam> hooks = GetAllHooks(GetSelectedProcessId());
+	if (hooks.size() == 0)
+	{
+		Host::AddConsoleOutput(L"no hooks detected");
+		return;
+	}
 	QStringList hookList;
 	for (auto i : hooks) hookList.push_back(
-				QString::fromWCharArray(Host::GetHookName(processCombo->currentText().split(":")[0].toInt(), i.address).c_str()) +
+				QString::fromStdWString(Host::GetHookName(GetSelectedProcessId(), i.address)) +
 				": " +
-				GenerateHCode(i, processCombo->currentText().split(":")[0].toInt())
+				GenerateCode(i, GetSelectedProcessId())
 			);
 	bool ok;
 	QString hook = QInputDialog::getItem(this, "Unhook", "Which hook to remove?", hookList, 0, false, &ok);
-	if (ok) Host::RemoveHook(processCombo->currentText().split(":")[0].toInt(), hooks.at(hookList.indexOf(hook)).address);
+	if (ok) Host::RemoveHook(GetSelectedProcessId(), hooks.at(hookList.indexOf(hook)).address);
 }
 
 void MainWindow::on_saveButton_clicked()
 {
-	QVector<HookParam> hooks = GetAllHooks(processCombo->currentText().split(":")[0].toInt());
-	QString hookList = GetFullModuleName(processCombo->currentText().split(":")[0].toInt());;
+	QVector<HookParam> hooks = GetAllHooks(GetSelectedProcessId());
+	QString hookList = GetFullModuleName(GetSelectedProcessId());
 	for (auto i : hooks)
 		if (!(i.type & HOOK_ENGINE))
-			hookList += " , " + GenerateHCode(i, processCombo->currentText().split(":")[0].toInt());
+			hookList += " , " + GenerateCode(i, GetSelectedProcessId());
 	QFile file("SavedHooks.txt");
 	if (!file.open(QIODevice::Append | QIODevice::Text)) return;
 	file.write((hookList + "\r\n").toUtf8());
@@ -218,32 +234,25 @@ void MainWindow::on_saveButton_clicked()
 
 void MainWindow::on_ttCombo_activated(int index)
 {
-	textOutput->setPlainText(QString::fromWCharArray(Host::GetThread(ttCombo->itemText(index).split(":")[0].toInt())->GetStore().c_str()));
+	textOutput->setPlainText(QString::fromStdWString(Host::GetThread(ParseTextThreadString(ttCombo->itemText(index)))->GetStore()));
 	textOutput->moveCursor(QTextCursor::End);
 }
 
 void MainWindow::on_addExtenButton_clicked()
 {
 	QString extenFileName = QFileDialog::getOpenFileName(this, "Select Extension dll", "C:\\", "Extensions (*.dll)");
-	if (!extenFileName.length()) return;
+	if (!extenFileName.size()) return;
 	QString extenName = extenFileName.split("/")[extenFileName.split("/").count() - 1];
-	extenName.chop(4);
-	QString copyTo = QString::number(extenCombo->itemText(extenCombo->count() - 1).split(":")[0].toInt() + 1) + "_" +
-			extenName +
-			"_nexthooker_extension.dll";
+	QString copyTo = QString::number(extenCombo->itemText(extenCombo->count() - 1).split(":")[0].toInt() + 1) + "_" + extenName;
 	QFile::copy(extenFileName, copyTo);
-	extenCombo->clear();
-	std::map<int, QString> extensions = LoadExtensions();
-	for (auto i : extensions) extenCombo->addItem(QString::number(i.first) + ":" + i.second);
+	ReloadExtensions();
 }
 
 void MainWindow::on_rmvExtenButton_clicked()
 {
 	if (extenCombo->currentText().size() == 0) return;
-	QString extenFileName = extenCombo->currentText().split(":")[0] + "_" + extenCombo->currentText().split(":")[1] + "_nexthooker_extension.dll";
+	QString extenFileName = extenCombo->currentText().split(":")[0] + "_" + extenCombo->currentText().split(": ")[1] + ".dll";
 	FreeLibrary(GetModuleHandleW(extenFileName.toStdWString().c_str()));
-	DeleteFileW(extenFileName.toStdWString().c_str());
-	extenCombo->clear();
-	std::map<int, QString> extensions = LoadExtensions();
-	for (auto i : extensions) extenCombo->addItem(QString::number(i.first) + ":" + i.second);
+	QFile::remove(extenFileName);
+	ReloadExtensions();
 }
