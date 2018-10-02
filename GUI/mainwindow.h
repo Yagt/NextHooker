@@ -1,13 +1,12 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "qtcommon.h"
 #include <QMainWindow>
-#include <Windows.h>
-#include <QVector>
-#include <unordered_map>
-#include <string>
-#include "../texthook/host.h"
-#include "hostsignaller.h"
+#include <QPlainTextEdit>
+#include <QComboBox>
+#include <QSettings>
+#include "host/host.h"
 
 namespace Ui
 {
@@ -23,7 +22,11 @@ public:
 	~MainWindow();
 
 signals:
-	void ThreadOutputReceived(TextThread* thread, QString output);
+	void SigAddProcess(unsigned int processId);
+	void SigRemoveProcess(unsigned int processId);
+	void SigAddThread(TextThread* thread);
+	void SigRemoveThread(TextThread* thread);
+	void SigThreadOutput(TextThread* thread, QString output);
 
 private slots:
 	void AddProcess(unsigned int processId);
@@ -41,10 +44,19 @@ private slots:
 	void on_rmvExtenButton_clicked();
 
 private:
+	QString TextThreadString(TextThread* thread);
+	ThreadParam ParseTextThreadString(QString textThreadString);
+	DWORD GetSelectedProcessId();
+	void ReloadExtensions();
+	std::unordered_map<std::string, int64_t> GetInfoForExtensions(TextThread* thread);
 	QVector<HookParam> GetAllHooks(DWORD processId);
 
-	Ui::MainWindow *ui;
-	HostSignaller* hostSignaller;
+	Ui::MainWindow* ui;
+	QSettings settings = QSettings("Textractor.ini", QSettings::IniFormat);
+	QComboBox* processCombo;
+	QComboBox* ttCombo;
+	QComboBox* extenCombo;
+	QPlainTextEdit* textOutput;
 };
 
 #endif // MAINWINDOW_H

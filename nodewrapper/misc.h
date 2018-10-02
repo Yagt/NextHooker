@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../texthook/host.h"
-#include "../vnrhook/include/const.h"
+#include "../include/const.h"
+#include "../vnrhook/host/host.h"
 #include <Psapi.h>
 
 #include <string>

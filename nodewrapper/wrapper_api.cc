@@ -1,7 +1,7 @@
 #include "wrapper_api.h"
 #include "misc.h"
-#include "../texthook/host.h"
-#include "../texthook/textthread.h"
+#include "../vnrhook/host/host.h"
+#include "../vnrhook/host/textthread.h"
 
 #include <iostream>
 #include <string>
@@ -9,20 +9,7 @@
 #include <locale>
 #include <codecvt>
 #include <queue>
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-NAN_METHOD(NodeWrapper::Start)
-{
-	Nan::HandleScope scope;
-	Host::Start();
-}
-
-NAN_METHOD(NodeWrapper::Open)
-{
-	Nan::HandleScope scope;
-	Host::Open();
-}
+#include <windows.h>
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -61,10 +48,10 @@ public:
 
 std::wstring TextThreadToString(TextThread *thread)
 {
-	ThreadParameter tp = thread->GetThreadParameter();
+	ThreadParam tp = thread->tp;
 
 	std::wstringstream wss;
-	wss << thread->Number() << L":"
+	wss << thread->handle << L":"
 		<< tp.pid << L":"
 		<< std::hex << std::uppercase << tp.hook << L":"
 		<< std::hex << std::uppercase << tp.retn << L":"
@@ -77,15 +64,15 @@ std::wstring TextThreadToString(TextThread *thread)
 
 v8::Local<v8::Object> TextThreadToV8Object(TextThread *thread)
 {
-	ThreadParameter tp = thread->GetThreadParameter();
+	ThreadParam tp = thread->tp;
 
 	v8::Local<v8::Object> obj = Nan::New<v8::Object>();
 
-	obj->Set(Nan::New("num").ToLocalChecked(), Nan::New((uint32_t)thread->Number()));
-	obj->Set(Nan::New("pid").ToLocalChecked(), Nan::New((uint32_t)tp.pid));
-	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New((uint32_t)tp.hook));
-	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New((uint32_t)tp.retn));
-	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New((uint32_t)tp.spl));
+	obj->Set(Nan::New("num").ToLocalChecked(), Nan::New(static_cast<double>(thread->handle)));
+	obj->Set(Nan::New("pid").ToLocalChecked(), Nan::New(static_cast<uint32_t>(tp.pid)));
+	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New(static_cast<double>(tp.hook)));
+	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New(static_cast<double>(tp.retn)));
+	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New(static_cast<double>(tp.spl)));
 	obj->Set(Nan::New("name").ToLocalChecked(), Nan::New(_converter.to_bytes(
 		Host::GetHookName(tp.pid, tp.hook)))
 		.ToLocalChecked());
@@ -103,15 +90,15 @@ v8::Local<v8::Object> TextThreadToV8Object(TextThread *thread)
 
 v8::Local<v8::Object> RemovedTextThreadToV8Object(TextThread *thread)
 {
-	ThreadParameter tp = thread->GetThreadParameter();
+	ThreadParam tp = thread->tp;
 
 	v8::Local<v8::Object> obj = Nan::New<v8::Object>();
 
-	obj->Set(Nan::New("num").ToLocalChecked(), Nan::New((uint32_t)thread->Number()));
-	obj->Set(Nan::New("pid").ToLocalChecked(), Nan::New((uint32_t)tp.pid));
-	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New((uint32_t)tp.hook));
-	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New((uint32_t)tp.retn));
-	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New((uint32_t)tp.spl));
+	obj->Set(Nan::New("num").ToLocalChecked(), Nan::New(static_cast<double>(thread->handle)));
+	obj->Set(Nan::New("pid").ToLocalChecked(), Nan::New(static_cast<uint32_t>(tp.pid)));
+	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New(static_cast<double>(tp.hook)));
+	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New(static_cast<double>(tp.retn)));
+	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New(static_cast<double>(tp.spl)));
 
 	return obj;
 }
@@ -158,8 +145,7 @@ void _callbackHandler(uv_async_t *handle)
 
 void _notifyCallback(CallbackInfo *info)
 {
-	switch (info->type)
-	{
+	switch (info->type) {
 	case CallbackType::PROCESS_ATTACH: {
 		v8::Local<v8::Value> argv[] = { Nan::New((uint32_t)info->pid) };
 		Nan::MakeCallback(Nan::GetCurrentContext()->Global(), Nan::New(_onProcessAttachFunction), 1, argv);
@@ -170,7 +156,7 @@ void _notifyCallback(CallbackInfo *info)
 		Nan::MakeCallback(Nan::GetCurrentContext()->Global(), Nan::New(_onProcessDetachFunction), 1, argv);
 	}
 		break;
-	case CallbackType::THREAD_CREATE: {		
+	case CallbackType::THREAD_CREATE: {
 		v8::Local<v8::Value> argv[] = { TextThreadToV8Object(info->tt) };
 		Nan::MakeCallback(Nan::GetCurrentContext()->Global(), Nan::New(_onThreadCreateFunction), 1, argv);
 	}
@@ -208,14 +194,6 @@ NAN_METHOD(NodeWrapper::OnProcessAttach)
 	}
 
 	_onProcessAttachFunction = Nan::Persistent<v8::Function>(info[0].As<v8::Function>());
-
-	Host::RegisterProcessAttachCallback([&](DWORD pid) {
-		CallbackInfo *newInfo = new CallbackInfo;
-		newInfo->type = CallbackType::PROCESS_ATTACH;
-		newInfo->pid = pid;
-		_callbackInfos.push(newInfo);
-		uv_async_send(&_async);
-	});
 }
 
 NAN_METHOD(NodeWrapper::OnProcessDetach)
@@ -227,14 +205,6 @@ NAN_METHOD(NodeWrapper::OnProcessDetach)
 	}
 
 	_onProcessDetachFunction = Nan::Persistent<v8::Function>(info[0].As<v8::Function>());
-
-	Host::RegisterProcessDetachCallback([&](DWORD pid) {
-		CallbackInfo *newInfo = new CallbackInfo;
-		newInfo->type = CallbackType::PROCESS_DETACH;
-		newInfo->pid = pid;
-		_callbackInfos.push(newInfo);
-		uv_async_send(&_async);
-	});
 }
 
 NAN_METHOD(NodeWrapper::OnThreadCreate)
@@ -247,25 +217,6 @@ NAN_METHOD(NodeWrapper::OnThreadCreate)
 
 	_onThreadCreateFunction = Nan::Persistent<v8::Function>(info[0].As<v8::Function>());
 	_onThreadOutputFunction = Nan::Persistent<v8::Function>(info[1].As<v8::Function>());
-
-	Host::RegisterThreadCreateCallback([&](TextThread* thread) {
-		CallbackInfo *newInfo = new CallbackInfo;
-		newInfo->type = CallbackType::THREAD_CREATE;
-		newInfo->tt = thread;
-		_callbackInfos.push(newInfo);
-
-		thread->RegisterOutputCallBack([&](TextThread* threadOut, std::wstring output) {
-			CallbackInfo *newInfo = new CallbackInfo;
-			newInfo->type = CallbackType::THREAD_OUTPUT;
-			newInfo->tt = threadOut;
-			newInfo->output = output;
-			_callbackInfos.push(newInfo);
-			uv_async_send(&_async);
-			return output;
-		});
-
-		uv_async_send(&_async);
-	});
 }
 
 NAN_METHOD(NodeWrapper::OnThreadRemove)
@@ -277,8 +228,46 @@ NAN_METHOD(NodeWrapper::OnThreadRemove)
 	}
 
 	_onThreadRemoveFunction = Nan::Persistent<v8::Function>(info[0].As<v8::Function>());
+}
 
-	Host::RegisterThreadRemoveCallback([&](TextThread* thread) {
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+NAN_METHOD(NodeWrapper::Start)
+{
+	Nan::HandleScope scope;
+	Host::Start(
+	[&](DWORD pid) {
+		CallbackInfo *newInfo = new CallbackInfo;
+		newInfo->type = CallbackType::PROCESS_ATTACH;
+		newInfo->pid = pid;
+		_callbackInfos.push(newInfo);
+		uv_async_send(&_async);
+	}, 
+	[&](DWORD pid) {
+		CallbackInfo *newInfo = new CallbackInfo;
+		newInfo->type = CallbackType::PROCESS_DETACH;
+		newInfo->pid = pid;
+		_callbackInfos.push(newInfo);
+		uv_async_send(&_async);
+	}, 
+	[&](TextThread* thread) {
+		CallbackInfo *newInfo = new CallbackInfo;
+		newInfo->type = CallbackType::THREAD_CREATE;
+		newInfo->tt = thread;
+		_callbackInfos.push(newInfo);
+		uv_async_send(&_async);
+
+		thread->RegisterOutputCallBack([&](TextThread* threadOut, std::wstring output) {
+			CallbackInfo *newInfo = new CallbackInfo;
+			newInfo->type = CallbackType::THREAD_OUTPUT;
+			newInfo->tt = threadOut;
+			newInfo->output = output;
+			_callbackInfos.push(newInfo);
+			uv_async_send(&_async);
+			return output;
+		});
+	}, 
+	[&](TextThread* thread) {
 		CallbackInfo *newInfo = new CallbackInfo;
 		newInfo->type = CallbackType::THREAD_REMOVE;
 		newInfo->tt = thread;

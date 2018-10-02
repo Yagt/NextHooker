@@ -2,56 +2,52 @@
 
 ## Overview
 
-node-nexthooker is a Node.js wrapper for NextHooker.
+node-nexthooker is a Node.js wrapper for NextHooker (now renamed Textractor).
 
-[NextHooker](https://github.com/Artikash/NextHooker) is a GUI text hooker based on [Stomp](http://www.hongfire.com/forum/showthread.php/438331-ITHVNR-ITH-with-the-VNR-engine)'s ITHVNR.
+[Textractor](https://github.com/Artikash/Textractor) is the next generation of text hooker made by [Artikash](https://github.com/Artikash/) and [DoumanAsh](https://github.com/DoumanAsh/).
 
 ## **WARNING**
 
-This addon could only work well with Electron!
-
-On original Node.js, no text will be get by the core lib.
-
-Don't know why for now, may be fixed in future.
+**For the best compatibility, vnrhook.dll and nexthooker.node SHOULD BE PLACED UNDER THE ROOT FOLDER OF YOUR PROJECT!!!**
 
 ## Usage (with Electron)
 
 ### Get the latest version
 
-    npm install --save-dev electron
-    npm install --save-dev nexthooker --force
+    npm install --save electron
+    npm install --save nexthooker --force
 
-if you see an error with *node-gyp rebuild*, don't worry.
+if you see an error with _node-gyp rebuild_, don't worry.
 
 ### Build library
 
     cd .\node_modules\nexthooker
 
 1. Open CMakeLists.txt from Visual Studio
-
-2. CMake -> Generate All
+2. Change build option to x86-Release
+3. CMake -> Generate All
 
 ### Rebuild for Electron
 
     npm install -g node-gyp
-    node-gyp rebuild --target=<ELECTRON_VERSION> --arch=ia32 --dist-url=https://atom.io/download/electron --debug
+    node-gyp rebuild --target=<ELECTRON_VERSION> --arch=ia32 --dist-url=https://atom.io/download/electron
 
-### Copy Library to Build Folder
+### Copy Library to ROOT Folder (IMPORTANT)
 
-    cp ./Builds/Debug/Debug/vnrhook.dll ./build/Debug && cp ./Builds/Debug/Debug/vnrhost.dll ./build/Debug
+    cp .\Builds\x86-Release\Build\vnrhook.dll ..\..
+    cp .\build\Release\nexthooker.node ..\..
 
 ### Create test program
 
-    const hooker = require('nexthooker/build/Debug/nexthooker')
-    hooker.start()
-    hooker.onProcessDetach((pid) => { console.log(`process detached: ${pid}`) })
+    const hooker = require('./nexthooker')
     hooker.onProcessAttach((pid) => { console.log(`process attached: ${pid}`) })
+    hooker.onProcessDetach((pid) => { console.log(`process detached: ${pid}`) })
     hooker.onThreadCreate(
         (thread) => { console.log(`thread create: ${JSON.stringify(thread)}`) },
         (thread, text) => { console.log(`get text '${text}' from thread: ${JSON.stringify(thread)}`) }
     )
     hooker.onThreadRemove((thread) => { console.log(`thread removed: ${JSON.stringify(thread)}`) })
-    hooker.open()
+    hooker.start()
     hooker.injectProcess(parseInt(process.argv[2]))
     /* index.js */
 
@@ -59,11 +55,11 @@ if you see an error with *node-gyp rebuild*, don't worry.
 
     .\node_modules\.bin\electron.cmd index.js <PID_OF_GAME>
 
-## ~~Usage (with Node.js)~~
+## Usage (with Node.js)
 
 ### Get the latest version
 
-    npm install nexthooker
+    npm install --save nexthooker --force
 
 or
 
@@ -72,31 +68,40 @@ or
 ### Build library
 
 1. Open CMakeLists.txt from Visual Studio
-2. CMake -> Generate All
+2. Change build option to x86-Release
+3. CMake -> Generate All
 
 ### Rebuild addon
 
     npm install -g node-gyp
-    node-gyp rebuild --debug && cp ./Builds/Debug/Debug/vnrhook.dll . && cp ./Builds/Debug/Debug/vnrhost.dll .
+    node-gyp rebuild
+
+### Copy Library to ROOT Folder (IMPORTANT)
+
+    cp .\Builds\x86-Release\Build\vnrhook.dll .
+    cp .\build\Release\nexthooker.node .
 
 ### Create test program
 
-    const hooker = require('./build/Debug/nexthooker')
-    hooker.start()
-    hooker.onProcessDetach((pid) => { console.log(`process detached: ${pid}`) })
+    const hooker = require('./nexthooker')
     hooker.onProcessAttach((pid) => { console.log(`process attached: ${pid}`) })
+    hooker.onProcessDetach((pid) => { console.log(`process detached: ${pid}`) })
     hooker.onThreadCreate(
         (thread) => { console.log(`thread create: ${JSON.stringify(thread)}`) },
         (thread, text) => { console.log(`get text '${text}' from thread: ${JSON.stringify(thread)}`) }
     )
     hooker.onThreadRemove((thread) => { console.log(`thread removed: ${JSON.stringify(thread)}`) })
-    hooker.open()
+    hooker.start()
     hooker.injectProcess(parseInt(process.argv[2]))
     /* index.js */
 
 ### Run test program
 
     node index.js <PID_OF_GAME>
+
+## Assertion of Using
+
+The four callback function (onProcessAttach, onProcessDetach, onThreadCreate and onThreadRemove) should be declared before start() being called.
 
 ## License
 
