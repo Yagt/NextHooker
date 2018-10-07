@@ -36,7 +36,6 @@ v8::Local<v8::Object> TextThreadToV8Object(TextThread *thread)
 	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New(static_cast<double>(tp.retn)));
 	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New(static_cast<double>(tp.spl)));
 	std::string sName = _converter.to_bytes(Host::GetHookName(tp.pid, tp.hook));
-	sName.pop_back();
 	obj->Set(Nan::New("name").ToLocalChecked(), Nan::New(sName).ToLocalChecked());
 	obj->Set(Nan::New("hcode").ToLocalChecked(), Nan::New(_converter.to_bytes(
 		GenerateHCodeWstring(Host::GetHookParam(tp.pid, tp.hook), tp.pid)))
