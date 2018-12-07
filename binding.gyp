@@ -8,7 +8,7 @@
 		'nodewrapper/misc.cc'
       ],
       'libraries': [
-		'<(module_root_dir)/Builds/Debug/x86/vnrhook'
+		'<(module_root_dir)/Builds/RelWithDebInfo/x86/vnrhook'
       ],
       'include_dirs': [
         "<!(node -e \"require('nan')\")",
