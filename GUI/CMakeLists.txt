@@ -9,9 +9,12 @@ set(gui_SRCS
 	main.cpp
 	mainwindow.cpp
 	misc.cpp
-    extensions.cpp
-	host/host.cc
-	host/textthread.cc
+    extenwindow.cpp
+	setdialog.cpp
+	tests.cpp
+	host/host.cpp
+	host/textthread.cpp
+	host/util.cpp
 	${RESOURCE_FILES}
 )
 add_executable(${PROJECT_NAME} WIN32 ${gui_SRCS})

@@ -1,49 +1,27 @@
 #include "misc.h"
 #include "const.h"
-#include <QRegExp>
+#include "host/util.h"
 #include <Psapi.h>
-
-QString GetFullModuleName(DWORD processId, HMODULE module)
-{
-	HANDLE handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
-	wchar_t buffer[MAX_PATH] = {};
-	GetModuleFileNameExW(handle, module, buffer, MAX_PATH);
-	CloseHandle(handle);
-	return QString::fromWCharArray(buffer);
-}
-
-QString GetModuleName(DWORD processId, HMODULE module)
-{
-	QString fullName = GetFullModuleName(processId, module);
-	return fullName.remove(0, fullName.lastIndexOf("\\") + 1);
-}
+#include <QTextStream>
 
 QMultiHash<QString, DWORD> GetAllProcesses()
 {
-	DWORD allProcessIds[0x1000];
-	DWORD spaceUsed;
+	DWORD allProcessIds[5000] = {}, spaceUsed = 0;
+	EnumProcesses(allProcessIds, sizeof(allProcessIds), &spaceUsed);
 	QMultiHash<QString, DWORD> ret;
-	if (!EnumProcesses(allProcessIds, sizeof(allProcessIds), &spaceUsed)) return ret;
 	for (int i = 0; i < spaceUsed / sizeof(DWORD); ++i)
-		if (GetModuleName(allProcessIds[i]).size())
-			ret.insert(GetModuleName(allProcessIds[i]), allProcessIds[i]);
+		if (auto processName = Util::GetModuleFileName(allProcessIds[i])) ret.insert(QFileInfo(QString::fromStdWString(processName.value())).fileName(), allProcessIds[i]);
 	return ret;
 }
 
 namespace
 {
-	DWORD Hash(QString module)
-	{
-		module = module.toLower();
-		DWORD hash = 0;
-		for (auto i : module) hash = _rotr(hash, 7) + i.unicode();
-		return hash;
-	}
-
 	std::optional<HookParam> ParseRCode(QString RCode)
 	{
 		HookParam hp = {};
 		hp.type |= DIRECT_READ;
+
+		// {S|Q|V}
 		switch (RCode.at(0).unicode())
 		{
 		case L'S':
@@ -58,25 +36,37 @@ namespace
 			return {};
 		}
 		RCode.remove(0, 1);
-		if (RCode.at(0).unicode() == L'0') RCode.remove(0, 1);
-		QRegExp stringGap("^\\*(\\-?[\\dA-F]+)");
-		if (stringGap.indexIn(RCode) != -1)
+
+		// [codepage#]
+		QRegularExpressionMatch codepage = QRegularExpression("^([0-9]+)#").match(RCode);
+		if (codepage.hasMatch())
 		{
-			hp.index = stringGap.cap(1).toInt(nullptr, 16);
-			RCode.remove(0, stringGap.cap(0).length());
-			hp.type |= DATA_INDIRECT;
+			hp.codepage = codepage.captured(1).toInt();
+			RCode.remove(0, codepage.captured(0).length());
 		}
-		if (RCode.at(0).unicode() != L'@') return {};
-		RCode.remove(0, 1);
-		QRegExp address("[\\dA-F]+$");
-		if (address.indexIn(RCode) == -1) return {};
-		hp.address = address.cap(0).toULongLong(nullptr, 16);
+
+		// [*deref_offset|0]
+		if (RCode.at(0).unicode() == L'0') RCode.remove(0, 1); // Legacy
+		QRegularExpressionMatch deref = QRegularExpression("^\\*(\\-?[[:xdigit:]]+)").match(RCode);
+		if (deref.hasMatch())
+		{
+			hp.type |= DATA_INDIRECT;
+			hp.index = deref.captured(1).toInt(nullptr, 16);
+			RCode.remove(0, deref.captured(0).length());
+		}
+
+		// @addr
+		QRegularExpressionMatch address = QRegularExpression("^@([[:xdigit:]]+)$").match(RCode);
+		if (!address.hasMatch()) return {};
+		hp.address = address.captured(1).toULongLong(nullptr, 16);
 		return hp;
 	}
 
 	std::optional<HookParam> ParseHCode(QString HCode)
 	{
 		HookParam hp = {};
+
+		// {A|B|W|S|Q|V}
 		switch (HCode.at(0).unicode())
 		{
 		case L'S':
@@ -103,139 +93,151 @@ namespace
 			return {};
 		}
 		HCode.remove(0, 1);
+
+		// [N]
 		if (HCode.at(0).unicode() == L'N')
 		{
 			hp.type |= NO_CONTEXT;
 			HCode.remove(0, 1);
 		}
-		QRegExp dataOffset("^\\-?[\\dA-F]+");
-		if (dataOffset.indexIn(HCode) == -1) return {};
-		hp.offset = dataOffset.cap(0).toInt(nullptr, 16);
-		HCode.remove(0, dataOffset.cap(0).length());
-		QRegExp dataIndirect("^\\*(\\-?[\\dA-F]+)");
-		if (dataIndirect.indexIn(HCode) != -1)
+
+		// [codepage#]
+		QRegularExpressionMatch codepage = QRegularExpression("^([0-9]+)#").match(HCode);
+		if (codepage.hasMatch())
+		{
+			hp.codepage = codepage.captured(1).toInt();
+			HCode.remove(0, codepage.captured(0).length());
+		}
+
+		// data_offset
+		QRegularExpressionMatch dataOffset = QRegularExpression("^\\-?[[:xdigit:]]+").match(HCode);
+		if (!dataOffset.hasMatch()) return {};
+		hp.offset = dataOffset.captured(0).toInt(nullptr, 16);
+		HCode.remove(0, dataOffset.captured(0).length());
+
+		// [*deref_offset1]
+		QRegularExpressionMatch deref1 = QRegularExpression("^\\*(\\-?[[:xdigit:]]+)").match(HCode);
+		if (deref1.hasMatch())
 		{
 			hp.type |= DATA_INDIRECT;
-			hp.index = dataIndirect.cap(1).toInt(nullptr, 16);
-			HCode.remove(0, dataIndirect.cap(0).length());
+			hp.index = deref1.captured(1).toInt(nullptr, 16);
+			HCode.remove(0, deref1.captured(0).length());
 		}
-		QRegExp split("^\\:(\\-?[\\dA-F]+)");
-		if (split.indexIn(HCode) != -1)
+
+		// [:split_offset[*deref_offset2]]
+		QRegularExpressionMatch splitOffset = QRegularExpression("^\\:(\\-?[[:xdigit:]]+)").match(HCode);
+		if (splitOffset.hasMatch())
 		{
 			hp.type |= USING_SPLIT;
-			hp.split = split.cap(1).toInt(nullptr, 16);
-			HCode.remove(0, split.cap(0).length());
-			QRegExp splitIndirect("^\\*(\\-?[\\dA-F]+)");
-			if (splitIndirect.indexIn(HCode) != -1)
+			hp.split = splitOffset.captured(1).toInt(nullptr, 16);
+			HCode.remove(0, splitOffset.captured(0).length());
+
+			QRegularExpressionMatch deref2 = QRegularExpression("^\\*(\\-?[[:xdigit:]]+)").match(HCode);
+			if (deref2.hasMatch())
 			{
 				hp.type |= SPLIT_INDIRECT;
-				hp.split_index = splitIndirect.cap(1).toInt(nullptr, 16);
-				HCode.remove(0, splitIndirect.cap(0).length());
+				hp.split_index = deref2.captured(1).toInt(nullptr, 16);
+				HCode.remove(0, deref2.captured(0).length());
 			}
 		}
-		if (HCode.at(0).unicode() != L'@') return {};
-		HCode.remove(0, 1);
-		QRegExp address("^([\\dA-F]+):?");
-		if (address.indexIn(HCode) == -1) return {};
-		hp.address = address.cap(1).toULongLong(nullptr, 16);
-		HCode.remove(address.cap(0));
-		if (HCode.length())
+
+		// @addr[:module[:func]]
+		QStringList addressPieces = HCode.split(":");
+		QRegularExpressionMatch address = QRegularExpression("^@([[:xdigit:]]+)$").match(addressPieces.at(0));
+		if (!address.hasMatch()) return {};
+		hp.address = address.captured(1).toULongLong(nullptr, 16);
+		if (addressPieces.size() > 1)
 		{
 			hp.type |= MODULE_OFFSET;
-			hp.module = Hash(HCode);
+			wcscpy_s<MAX_MODULE_SIZE>(hp.module, addressPieces.at(1).toStdWString().c_str());
 		}
-		if (hp.offset < 0)
-			hp.offset -= 4;
-		if (hp.split < 0)
-			hp.split -= 4;
-		return hp;
-	}
+		if (addressPieces.size() > 2)
+		{
+			hp.type |= FUNCTION_OFFSET;
+			strcpy_s<MAX_MODULE_SIZE>(hp.function, addressPieces.at(2).toStdString().c_str());
+		}
 
-	QString GenerateHCode(HookParam hp, DWORD processId)
-	{
-		QString code = "/H";
-		if (hp.type & USING_UNICODE)
-		{
-			if (hp.type & USING_STRING)
-				code += "Q";
-			else
-				code += "W";
-		}
-		else
-		{
-			if (hp.type & USING_UTF8)
-				code += "V";
-			else if (hp.type & USING_STRING)
-				code += "S";
-			else if (hp.type & BIG_ENDIAN)
-				code += "A";
-			else
-				code += "B";
-		}
-		if (hp.type & NO_CONTEXT)
-			code += "N";
-		if (hp.offset < 0) hp.offset += 4;
-		if (hp.split < 0) hp.split += 4;
-		if (hp.offset < 0)
-			code += "-" + QString::number(-hp.offset, 16);
-		else
-			code += QString::number(hp.offset, 16);
-		if (hp.type & DATA_INDIRECT)
-		{
-			if (hp.index < 0)
-				code += "*-" + QString::number(-hp.index, 16);
-			else
-				code += "*" + QString::number(hp.index, 16);
-		}
-		if (hp.type & USING_SPLIT)
-		{
-			if (hp.split < 0)
-				code += ":-" + QString::number(-hp.split, 16);
-			else
-				code += ":" + QString::number(hp.split, 16);
-		}
-		if (hp.type & SPLIT_INDIRECT)
-		{
-			if (hp.split_index < 0)
-				code += "*-" + QString::number(-hp.split_index, 16);
-			else
-				code += "*" + QString::number(hp.split_index, 16);
-		}
-		code += "@";
-		QString badCode = (code + QString::number(hp.address, 16)).toUpper();
-		HANDLE processHandle;
-		if (!(processHandle = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, processId))) return badCode;
-		MEMORY_BASIC_INFORMATION info;
-		if (!VirtualQueryEx(processHandle, (LPCVOID)hp.address, &info, sizeof(info))) return badCode;
-		QString moduleName = GetModuleName(processId, (HMODULE)info.AllocationBase);
-		if (moduleName.size() == 0) return badCode;
-		code += QString::number(hp.address - (DWORD)info.AllocationBase, 16) + ":";
-		code = code.toUpper();
-		code += moduleName;
-		return code;
+		// ITH has registers offset by 4 vs AGTH: need this to correct
+		if (hp.offset < 0) hp.offset -= 4;
+		if (hp.split < 0) hp.split -= 4;
+
+		return hp;
 	}
 
 	QString GenerateRCode(HookParam hp)
 	{
-		QString code = "/R";
+		QString RCode = "/R";
+		QTextStream codeBuilder(&RCode);
+
+		if (hp.type & USING_UNICODE) codeBuilder << "Q";
+		else if (hp.type & USING_UTF8) codeBuilder << "V";
+		else codeBuilder << "S";
+
+		if (hp.codepage != 0 && hp.codepage != CP_UTF8) codeBuilder << hp.codepage << "#";
+
+		codeBuilder.setIntegerBase(16);
+		codeBuilder.setNumberFlags(QTextStream::UppercaseDigits);
+
+		if (hp.type & DATA_INDIRECT) codeBuilder << "*" << hp.index;
+
+		codeBuilder << "@" << hp.address;
+
+		return RCode;
+	}
+
+	QString GenerateHCode(HookParam hp, DWORD processId)
+	{
+		QString HCode = "/H";
+		QTextStream codeBuilder(&HCode);
+
 		if (hp.type & USING_UNICODE)
-			code += "Q";
-		else if (hp.type & USING_UTF8)
-			code += "V";
+		{
+			if (hp.type & USING_STRING) codeBuilder << "Q";
+			else codeBuilder << "W";
+		}
 		else
-			code += "S";
-		if (hp.type & DATA_INDIRECT)
-			code += "*" + QString::number(hp.index, 16);
-		//code += QString::number(hp.offset, 16);
-		code += "@";
-		code += QString::number(hp.address, 16);
-		return code.toUpper();
+		{
+			if (hp.type & USING_UTF8) codeBuilder << "V";
+			else if (hp.type & USING_STRING) codeBuilder << "S";
+			else if (hp.type & BIG_ENDIAN) codeBuilder << "A";
+			else codeBuilder << "B";
+		}
+		if (hp.type & NO_CONTEXT) codeBuilder << "N";
+
+		if (hp.codepage != 0 && hp.codepage != CP_UTF8) codeBuilder << hp.codepage << "#";
+
+		codeBuilder.setIntegerBase(16);
+		codeBuilder.setNumberFlags(QTextStream::UppercaseDigits);
+
+		if (hp.offset < 0) hp.offset += 4;
+		if (hp.split < 0) hp.split += 4;
+
+		codeBuilder << hp.offset;
+		if (hp.type & DATA_INDIRECT) codeBuilder << "*" << hp.index;
+		if (hp.type & USING_SPLIT) codeBuilder << ":" << hp.split;
+		if (hp.type & SPLIT_INDIRECT) codeBuilder << "*" << hp.split_index;
+
+		// Attempt to make the address relative
+		if (!(hp.type & MODULE_OFFSET))
+			if (AutoHandle<> process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, processId))
+				if (MEMORY_BASIC_INFORMATION info = {}; VirtualQueryEx(process, (LPCVOID)hp.address, &info, sizeof(info)))
+					if (auto moduleName = Util::GetModuleFileName(processId, (HMODULE)info.AllocationBase))
+					{
+						hp.type |= MODULE_OFFSET;
+						hp.address -= (uint64_t)info.AllocationBase;
+						wcscpy_s<MAX_MODULE_SIZE>(hp.module, moduleName->c_str() + moduleName->rfind(L'\\') + 1);
+					}
+
+		codeBuilder << "@" << hp.address;
+		if (hp.type & MODULE_OFFSET) codeBuilder << ":" << QString::fromWCharArray(hp.module);
+		if (hp.type & FUNCTION_OFFSET) codeBuilder << ":" << hp.function;
+
+		return HCode;
 	}
 }
 
 std::optional<HookParam> ParseCode(QString code)
 {
-	code = code.toUpper();
 	if (code.startsWith("/H")) return ParseHCode(code.remove(0, 2));
 	else if (code.startsWith("/R")) return ParseRCode(code.remove(0, 2));
 	else return {};

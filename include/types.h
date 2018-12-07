@@ -3,6 +3,42 @@
 #include "common.h"
 #include "const.h"
 
+template<typename E, typename M = std::mutex, template<typename...> typename P = std::unique_ptr>
+class ThreadSafePtr
+{
+public:
+	template <typename ...Args> ThreadSafePtr(Args ...args) : ptr(new E(args...)), mtxPtr(new M) {}
+	auto operator->()
+	{
+		struct
+		{
+			E* operator->() { return ptr; }
+			std::unique_lock<M> lock;
+			E* ptr;
+		} lockedProxy{ std::unique_lock<M>(*mtxPtr), ptr.get() };
+		return lockedProxy;
+	}
+
+private:
+	P<E> ptr;
+	P<M> mtxPtr;
+};
+
+struct DefHandleCloser { void operator()(void* h) { CloseHandle(h); } };
+template <typename HandleCloser = DefHandleCloser>
+class AutoHandle
+{
+public:
+	AutoHandle(HANDLE h) : h(h) {}
+	operator HANDLE() { return h.get(); }
+	operator PHANDLE() { return &h._Myptr(); }
+	operator bool() { return h.get() != NULL && h.get() != INVALID_HANDLE_VALUE; }
+
+private:
+	struct HandleCleaner : HandleCloser { void operator()(void* h) { if (h != INVALID_HANDLE_VALUE) HandleCloser::operator()(h); } };
+	std::unique_ptr<void, HandleCleaner> h;
+};
+
 // jichi 3/7/2014: Add guessed comment
 struct HookParam 
 {
@@ -11,13 +47,16 @@ struct HookParam
 	typedef bool(*filter_fun_t)(LPVOID str, DWORD *len, HookParam *hp, BYTE index); // jichi 10/24/2014: Add filter function. Return true if skip the text
 	typedef bool(*hook_fun_t)(DWORD esp, HookParam *hp); // jichi 10/24/2014: Add generic hook function, return false if stop execution.
 
-	uint64_t address; // absolute or relative address
+	uint64_t insertion_address; // absolute address
+	uint64_t address; // absolute or relative address (not changed by TextHook)
 	int offset, // offset of the data in the memory
 		index, // deref_offset1
 		split, // offset of the split character
 		split_index; // deref_offset2
-	DWORD module; // hash of the module
+	wchar_t module[MAX_MODULE_SIZE];
+	char function[MAX_MODULE_SIZE];
 	DWORD type; // flags
+	UINT codepage; // text encoding
 	WORD length_offset; // index of the string length
 	DWORD user_value; // 7/20/2014: jichi additional parameters for PSP games
 
@@ -25,33 +64,36 @@ struct HookParam
 	filter_fun_t filter_fun;
 	hook_fun_t hook_fun;
 
-	HANDLE readerHandle; // Artikash 8/4/2018: handle for reader thread
+	char name[HOOK_NAME_SIZE];
 };
 
-struct ThreadParam // From hook, used internally by host as well
+struct ThreadParam
 {
-	DWORD pid; // jichi: 5/11/2014: The process ID
-	uint64_t hook; // Artikash 6/6/2018: The insertion address of the hook
-	uint64_t retn; // jichi 5/11/2014: The return address of the hook
-	uint64_t spl;  // jichi 5/11/2014: the processed split value of the hook paramete
+	DWORD processId;
+	uint64_t addr;
+	uint64_t ctx; // The context of the hook: by default the first value on stack, usually the return address
+	uint64_t ctx2;  // The subcontext of the hook: 0 by default, generated in a method specific to the hook
 };
 // Artikash 5/31/2018: required for unordered_map to work with struct key
-template <> struct std::hash<ThreadParam> { size_t operator()(const ThreadParam& tp) const { return std::hash<int64_t>()((tp.pid + tp.hook) ^ (tp.retn + tp.spl)); } };
-static bool operator==(const ThreadParam& one, const ThreadParam& two) { return one.pid == two.pid && one.hook == two.hook && one.retn == two.retn && one.spl == two.spl; }
+template <> struct std::hash<ThreadParam> { size_t operator()(ThreadParam tp) const { return std::hash<int64_t>()((tp.processId + tp.addr) ^ (tp.ctx + tp.ctx2)); } };
+static bool operator==(ThreadParam one, ThreadParam two) { return one.processId == two.processId && one.addr == two.addr && one.ctx == two.ctx && one.ctx2 == two.ctx2; }
+
+class WinMutex // Like CMutex but works with lock_guard
+{
+public:
+	WinMutex(std::wstring name) : m(CreateMutexW(nullptr, FALSE, name.c_str())) {}
+	void lock() { if (m) WaitForSingleObject(m, 0); }
+	void unlock() { if (m) ReleaseMutex(m); }
+
+private:
+	AutoHandle<> m;
+};
 
 struct InsertHookCmd // From host
 {
-	InsertHookCmd(HookParam hp, std::string name = "") : hp(hp) { strcpy_s<MESSAGE_SIZE>(this->name, name.c_str()); };
+	InsertHookCmd(HookParam hp) : hp(hp) {};
 	int command = HOST_COMMAND_NEW_HOOK;
 	HookParam hp;
-	char name[MESSAGE_SIZE] = {};
-};
-
-struct RemoveHookCmd // From host
-{
-	RemoveHookCmd(uint64_t address) : address(address) {};
-	int command = HOST_COMMAND_REMOVE_HOOK;
-	uint64_t address;
 };
 
 struct ConsoleOutputNotif // From hook
@@ -68,4 +110,4 @@ struct HookRemovedNotif // From hook
 	uint64_t address;
 };
 
-#define LOCK(mutex) std::lock_guard<std::recursive_mutex> lock(mutex)
+#define LOCK(mutex) std::lock_guard lock(mutex)

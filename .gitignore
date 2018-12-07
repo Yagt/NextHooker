@@ -1,5 +1,7 @@
 *.vs/
 *.pro.user
+node_modules/
 build/
 Builds/
-node_modules/
+*.vscode/
+*.user

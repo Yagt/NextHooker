@@ -1,8 +1,18 @@
+include(QtUtils)
+msvc_registry_search()
+find_qt5(Core Widgets)
+
 cmake_policy(SET CMP0037 OLD)
 
-add_library(1_Remove\ Repetition SHARED removerepeat.cpp)
-add_library(2_Copy\ to\ Clipboard SHARED copyclipboard.cpp)
-add_library(3_Google\ Translate SHARED googletranslate.cpp)
-add_library(4_Extra\ Newlines SHARED extranewlines.cpp)
+add_library(Bing\ Translate SHARED bingtranslate/bingtranslate.cpp extensionimpl.cpp)
+add_library(Copy\ to\ Clipboard SHARED copyclipboard/copyclipboard.cpp extensionimpl.cpp)
+add_library(Extra\ Newlines SHARED extranewlines/extranewlines.cpp extensionimpl.cpp)
+add_library(Google\ Translate SHARED googletranslate/googletranslate.cpp extensionimpl.cpp)
+add_library(Regex\ Filter SHARED regexfilter/regexfilter.cpp regexfilter/window.cpp extensionimpl.cpp)
+add_library(Remove\ Repetition SHARED removerepeat/removerepeat.cpp extensionimpl.cpp)
+add_library(Thread\ Linker SHARED threadlinker/threadlinker.cpp threadlinker/window.cpp extensionimpl.cpp)
 
-target_link_libraries(3_Google\ Translate winhttp.lib)
+target_link_libraries(Bing\ Translate winhttp Qt5::Widgets)
+target_link_libraries(Google\ Translate winhttp Qt5::Widgets)
+target_link_libraries(Regex\ Filter Qt5::Widgets)
+target_link_libraries(Thread\ Linker Qt5::Widgets)

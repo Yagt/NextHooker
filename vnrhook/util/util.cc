@@ -3,7 +3,6 @@
 // Branch: ITH_Engine/engine.cpp, revision 133
 // See: http://ja.wikipedia.org/wiki/プロジェクト:美少女ゲーム系/ゲームエンジン
 
-#include "common.h"
 #include "util/util.h"
 #include "ithsys/ithsys.h"
 #include "main.h"
@@ -26,10 +25,30 @@ DWORD SigMask(DWORD sig)
 	return 0xffffffff >> (count << 3);
 }
 
+uint64_t SafeSearchMemory(uint64_t startAddr, uint64_t endAddr, const BYTE* bytes, short length)
+{
+	__try
+	{
+		for (int i = 0; i < endAddr - startAddr - length; ++i)
+			for (int j = 0; j <= length; ++j)
+				if (j == length) return startAddr + i; // not sure about this algorithm...
+				else if (*((BYTE*)startAddr + i + j) != *(bytes + j) && *(bytes + j) != 0x11) break; // 0x11 = wildcard
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		ConsoleOutput("Textractor: SearchMemory ERROR (Textractor will likely still work fine, but please let Artikash know if this happens a lot!)");
+		return 0;
+	}
+	return 0;
+}
+
 } // namespace unnamed
 
+namespace Util
+{
+
 // jichi 8/24/2013: binary search?
-DWORD Util::GetCodeRange(DWORD hModule,DWORD *low, DWORD *high)
+DWORD GetCodeRange(DWORD hModule,DWORD *low, DWORD *high)
 {
   IMAGE_DOS_HEADER *DosHdr;
   IMAGE_NT_HEADERS *NtHdr;
@@ -50,7 +69,7 @@ DWORD Util::GetCodeRange(DWORD hModule,DWORD *low, DWORD *high)
   return 0;
 }
 
-DWORD Util::FindCallAndEntryBoth(DWORD fun, DWORD size, DWORD pt, DWORD sig)
+DWORD FindCallAndEntryBoth(DWORD fun, DWORD size, DWORD pt, DWORD sig)
 {
   //WCHAR str[0x40];
   enum { reverse_length = 0x800 };
@@ -92,7 +111,7 @@ DWORD Util::FindCallAndEntryBoth(DWORD fun, DWORD size, DWORD pt, DWORD sig)
   return 0;
 }
 
-DWORD Util::FindCallOrJmpRel(DWORD fun, DWORD size, DWORD pt, bool jmp)
+DWORD FindCallOrJmpRel(DWORD fun, DWORD size, DWORD pt, bool jmp)
 {
   BYTE sig = (jmp) ? 0xe9 : 0xe8;
   for (DWORD i = 0x1000; i < size - 4; i++)
@@ -107,7 +126,7 @@ DWORD Util::FindCallOrJmpRel(DWORD fun, DWORD size, DWORD pt, bool jmp)
   return 0;
 }
 
-DWORD Util::FindCallOrJmpAbs(DWORD fun, DWORD size, DWORD pt, bool jmp)
+DWORD FindCallOrJmpAbs(DWORD fun, DWORD size, DWORD pt, bool jmp)
 {
   WORD sig = jmp ? 0x25ff : 0x15ff;
   for (DWORD i = 0x1000; i < size - 4; i++)
@@ -123,7 +142,7 @@ DWORD Util::FindCallOrJmpAbs(DWORD fun, DWORD size, DWORD pt, bool jmp)
   return 0;
 }
 
-DWORD Util::FindCallBoth(DWORD fun, DWORD size, DWORD pt)
+DWORD FindCallBoth(DWORD fun, DWORD size, DWORD pt)
 {
   for (DWORD i = 0x1000; i < size - 4; i++) {
     if (*(BYTE *)(pt + i) == 0xe8) {
@@ -144,7 +163,7 @@ DWORD Util::FindCallBoth(DWORD fun, DWORD size, DWORD pt)
   return 0;
 }
 
-DWORD Util::FindCallAndEntryAbs(DWORD fun, DWORD size, DWORD pt, DWORD sig)
+DWORD FindCallAndEntryAbs(DWORD fun, DWORD size, DWORD pt, DWORD sig)
 {
   //WCHAR str[0x40];
   enum { reverse_length = 0x800 };
@@ -169,7 +188,7 @@ DWORD Util::FindCallAndEntryAbs(DWORD fun, DWORD size, DWORD pt, DWORD sig)
   return 0;
 }
 
-DWORD Util::FindCallAndEntryRel(DWORD fun, DWORD size, DWORD pt, DWORD sig)
+DWORD FindCallAndEntryRel(DWORD fun, DWORD size, DWORD pt, DWORD sig)
 {
   //WCHAR str[0x40];
   enum { reverse_length = 0x800 };
@@ -185,7 +204,7 @@ DWORD Util::FindCallAndEntryRel(DWORD fun, DWORD size, DWORD pt, DWORD sig)
   return 0;
 }
 
-bool Util::CheckFile(LPCWSTR name)
+bool CheckFile(LPCWSTR name)
 {
 	WIN32_FIND_DATAW unused;
 	HANDLE file = FindFirstFileW(name, &unused);
@@ -207,7 +226,7 @@ bool Util::CheckFile(LPCWSTR name)
 	return false;
 }
 
-DWORD Util::FindEntryAligned(DWORD start, DWORD back_range)
+DWORD FindEntryAligned(DWORD start, DWORD back_range)
 {
   start &= ~0xf;
   for (DWORD i = start, j = start - back_range; i > j; i-=0x10) {
@@ -237,7 +256,7 @@ DWORD Util::FindEntryAligned(DWORD start, DWORD back_range)
   return 0;
 }
 
-DWORD Util::FindImportEntry(DWORD hModule, DWORD fun)
+DWORD FindImportEntry(DWORD hModule, DWORD fun)
 {
   IMAGE_DOS_HEADER *DosHdr;
   IMAGE_NT_HEADERS *NtHdr;
@@ -261,7 +280,7 @@ DWORD Util::FindImportEntry(DWORD hModule, DWORD fun)
 }
 
 // Search string in rsrc section. This section usually contains version and copyright info.
-bool Util::SearchResourceString(LPCWSTR str)
+bool SearchResourceString(LPCWSTR str)
 {
   DWORD hModule = (DWORD)GetModuleHandleW(nullptr);
   IMAGE_DOS_HEADER *DosHdr;
@@ -284,49 +303,33 @@ bool Util::SearchResourceString(LPCWSTR str)
   return false;
 }
 
-namespace
+std::vector<uint64_t> SearchMemory(const BYTE* bytes, short length, DWORD protect)
 {
-	DWORD SafeSearchMemory(DWORD startAddr, DWORD endAddr, const BYTE* bytes, unsigned short length)
-	{
-		__try
-		{
-			for (int i = 0; i < endAddr - startAddr - length; ++i)
-				for (int j = 0; j <= length; ++j)
-					if (j == length) return startAddr + i; // not sure about this algorithm...
-					else if (*((BYTE*)startAddr + i + j) != *(bytes + j) && *(bytes + j) != 0x11) break; // 0x11 = wildcard
-		} 
-		__except (1)
-		{
-			ConsoleOutput("Textractor: SearchMemory ERROR (Textractor will likely still work fine, but please let Artikash know if this happens a lot!)");
-			return 0;
-		}
-		return 0;
-	}
-}
-
-DWORD Util::SearchMemory(const BYTE* bytes, unsigned short length, DWORD protect)
-{
-	std::vector<std::pair<DWORD, DWORD>> validMemory;
-	for (BYTE* probe = NULL; (DWORD)probe < 0x80000000;) // end of user memory space
+	std::vector<std::pair<uint64_t, uint64_t>> validMemory;
+	for (BYTE* probe = NULL; (uint64_t)probe < 0x80000000;) // end of user memory space
 	{
 		MEMORY_BASIC_INFORMATION info = {};
 		if (!VirtualQuery(probe, &info, sizeof(info)))
 		{
-			probe += 0x1000;
+			probe += 0x1000; // page size
 			continue;
 		}
 		else
 		{
-			if (info.Protect >= protect && !(info.Protect & PAGE_GUARD)) validMemory.push_back({ (DWORD)info.BaseAddress, info.RegionSize });
+			if (info.Protect >= protect && !(info.Protect & PAGE_GUARD)) validMemory.push_back({ (uint64_t)info.BaseAddress, info.RegionSize });
 			probe += info.RegionSize;
 		}
 	}
 
+	std::vector<uint64_t> ret;
 	for (auto memory : validMemory)
-		if (DWORD ret = SafeSearchMemory(memory.first, memory.first + memory.second, bytes, length))
-			return ret;
+		for (uint64_t addr = memory.first; true;)
+			if (addr = SafeSearchMemory(addr, memory.first + memory.second, bytes, length))
+				ret.push_back(addr++);
+			else break;
 
-	return 0;
+	return ret;
+}
 }
 
 // EOF

@@ -10,18 +10,105 @@
 
 #include "main.h"
 #include "defs.h"
+#include "text.h"
 #include "MinHook.h"
-#include "pipe.h"
 #include "engine/engine.h"
 #include "engine/match.h"
-#include "hijack/texthook.h"
+#include "texthook.h"
 #include "util/growl.h"
 
-HANDLE hSection;
-bool running;
-int currentHook = 0, userhookCount = 0;
-DWORD trigger = 0;
-HANDLE hmMutex;
+std::unique_ptr<WinMutex> viewMutex;
+
+namespace
+{
+	AutoHandle<> hookPipe = INVALID_HANDLE_VALUE, mappedFile = INVALID_HANDLE_VALUE;
+	TextHook* hooks;
+	bool running;
+	int currentHook = 0;
+	DWORD DUMMY;
+}
+
+DWORD WINAPI Pipe(LPVOID)
+{
+	while (running)
+	{
+		DWORD count = 0;
+		BYTE buffer[PIPE_BUFFER_SIZE] = {};
+		AutoHandle<> hostPipe = INVALID_HANDLE_VALUE;
+		hookPipe = INVALID_HANDLE_VALUE;
+
+		while (hookPipe == INVALID_HANDLE_VALUE || hostPipe == INVALID_HANDLE_VALUE)
+		{
+			if (hookPipe == INVALID_HANDLE_VALUE)
+			{
+				hookPipe = CreateFileW(HOOK_PIPE, GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+			}
+			if (hookPipe != INVALID_HANDLE_VALUE && hostPipe == INVALID_HANDLE_VALUE)
+			{
+				hostPipe = CreateFileW(HOST_PIPE, GENERIC_READ | FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+				DWORD mode = PIPE_READMODE_MESSAGE;
+				SetNamedPipeHandleState(hostPipe, &mode, NULL, NULL);
+				continue;
+			}
+			Sleep(50);
+		}
+
+		*(DWORD*)buffer = GetCurrentProcessId();
+		WriteFile(hookPipe, buffer, sizeof(DWORD), &count, nullptr);
+
+		ConsoleOutput(PIPE_CONNECTED);
+#ifdef _WIN64
+		ConsoleOutput(DISABLE_HOOKS);
+#else
+		Engine::Hijack();
+#endif
+
+		while (running && ReadFile(hostPipe, buffer, PIPE_BUFFER_SIZE, &count, nullptr))
+			switch (*(HostCommandType*)buffer)
+			{
+			case HOST_COMMAND_NEW_HOOK:
+			{
+				auto info = *(InsertHookCmd*)buffer;
+				NewHook(info.hp, "UserHook", 0);
+			}
+			break;
+			case HOST_COMMAND_DETACH:
+			{
+				running = false;
+			}
+			break;
+			}
+	}
+	hookPipe = INVALID_HANDLE_VALUE;
+	for (int i = 0; i < MAX_HOOK; ++i) if (hooks[i].hp.insertion_address) hooks[i].Clear();
+	FreeLibraryAndExitThread(GetModuleHandleW(ITH_DLL), 0);
+	return 0;
+}
+
+void TextOutput(ThreadParam tp, BYTE* text, int len)
+{
+	if (len < 0) return;
+	if (len > PIPE_BUFFER_SIZE - sizeof(ThreadParam)) len = PIPE_BUFFER_SIZE - sizeof(ThreadParam);
+	BYTE buffer[PIPE_BUFFER_SIZE] = {};
+	*(ThreadParam*)buffer = tp;
+	memcpy(buffer + sizeof(ThreadParam), text, len);
+	WriteFile(hookPipe, buffer, sizeof(ThreadParam) + len, &DUMMY, nullptr);
+}
+
+void ConsoleOutput(LPCSTR text, ...)
+{
+	ConsoleOutputNotif buffer;
+	va_list args;
+	va_start(args, text);
+	vsprintf_s<MESSAGE_SIZE>(buffer.message, text, args);
+	WriteFile(hookPipe, &buffer, sizeof(buffer), &DUMMY, nullptr);
+}
+
+void NotifyHookRemove(uint64_t addr)
+{
+	HookRemovedNotif buffer(addr);
+	WriteFile(hookPipe, &buffer, sizeof(buffer), &DUMMY, nullptr);
+}
 
 BOOL WINAPI DllMain(HINSTANCE hModule, DWORD fdwReason, LPVOID)
 {
@@ -29,70 +116,45 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD fdwReason, LPVOID)
 	{
 	case DLL_PROCESS_ATTACH:
 	{
-		::hmMutex = CreateMutexW(nullptr, FALSE, (ITH_HOOKMAN_MUTEX_ + std::to_wstring(GetCurrentProcessId())).c_str());
+		viewMutex = std::make_unique<WinMutex>(ITH_HOOKMAN_MUTEX_ + std::to_wstring(GetCurrentProcessId()));
 		if (GetLastError() == ERROR_ALREADY_EXISTS) return FALSE;
 		DisableThreadLibraryCalls(hModule);
 
 		// jichi 9/25/2013: Interprocedural communication with vnrsrv.
-		hSection = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE, 0, HOOK_SECTION_SIZE, (ITH_SECTION_ + std::to_wstring(GetCurrentProcessId())).c_str());
-		::hookman = (TextHook*)MapViewOfFile(hSection, FILE_MAP_ALL_ACCESS | FILE_MAP_EXECUTE, 0, 0, HOOK_BUFFER_SIZE);
-		memset(::hookman, 0, HOOK_BUFFER_SIZE);
+		mappedFile = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE, 0, HOOK_SECTION_SIZE, (ITH_SECTION_ + std::to_wstring(GetCurrentProcessId())).c_str());
+		hooks = (TextHook*)MapViewOfFile(mappedFile, FILE_MAP_ALL_ACCESS | FILE_MAP_EXECUTE, 0, 0, HOOK_BUFFER_SIZE);
+		memset(hooks, 0, HOOK_BUFFER_SIZE);
 
 		MH_Initialize();
+		running = true;
 
-		::running = true;
-
-		CreatePipe();
+		CreateThread(nullptr, 0, Pipe, nullptr, 0, nullptr); // Using std::thread here = deadlock
 	} 
 	break;
 	case DLL_PROCESS_DETACH:
 	{
-		::running = false;
+		running = false;
+		UnmapViewOfFile(hooks);
 		MH_Uninitialize();
-		for (TextHook *man = ::hookman; man < ::hookman + MAX_HOOK; man++) if (man->hp.address) man->ClearHook();
-		//if (ith_has_section)
-		UnmapViewOfFile(::hookman);
-
-		CloseHandle(::hookPipe);
-		CloseHandle(hSection);
-		CloseHandle(hmMutex);
-		//} ITH_EXCEPT {}
 	}
 	break;
 	}
 	return TRUE;
 }
 
-//extern "C" {
-void NewHook(const HookParam &hp, LPCSTR lpname, DWORD flag)
+void NewHook(HookParam hp, LPCSTR lpname, DWORD flag)
 {
-	std::string name = lpname;
-	if (++currentHook < MAX_HOOK) 
-	{
-		if (name[0] == '\0') name = "UserHook" + std::to_string(userhookCount++);
-		ConsoleOutput(("Textractor: try inserting hook: " + name).c_str());
-
-		// jichi 7/13/2014: This function would raise when too many hooks added
-		::hookman[currentHook].InitHook(hp, name.c_str(), flag);
-		if (::hookman[currentHook].InsertHook()) ConsoleOutput(("Textractor: inserted hook: " + name).c_str());
-		else ConsoleOutput("Textractor:WARNING: failed to insert hook");
-	}
-	else ConsoleOutput("Textractor: too many hooks: can't insert");
+	if (++currentHook >= MAX_HOOK) return ConsoleOutput(TOO_MANY_HOOKS);
+	if (lpname && *lpname) strcpy_s<HOOK_NAME_SIZE>(hp.name, lpname);
+	ConsoleOutput(INSERTING_HOOK, hp.name);
+	RemoveHook(hp.address, 0);
+	if (!hooks[currentHook].Insert(hp, flag)) ConsoleOutput(HOOK_FAILED);
 }
 
-void RemoveHook(uint64_t addr)
+void RemoveHook(uint64_t addr, int maxOffset)
 {
 	for (int i = 0; i < MAX_HOOK; i++)
-		if (abs((long long)(::hookman[i].hp.address - addr)) < 9)
-		{
-			::hookman[i].ClearHook();
-			return;
-		}
-}
-
-void SwitchTrigger(DWORD t)
-{
-	trigger = t;
+		if (abs((long long)(hooks[i].hp.insertion_address - addr)) <= maxOffset) return hooks[i].Clear();
 }
 
 // EOF

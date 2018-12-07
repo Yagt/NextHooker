@@ -2,5 +2,10 @@
 
 #include "common.h"
 #include <QString>
-#include <QStringList>
 #include <QVector>
+#include <QHash>
+#include <QMainWindow>
+#include <QDialog>
+#include <QFile>
+#include <QFileInfo>
+#include <QRegularExpression>

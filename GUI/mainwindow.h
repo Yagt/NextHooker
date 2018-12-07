@@ -1,12 +1,11 @@
-#ifndef MAINWINDOW_H
-#define MAINWINDOW_H
+#pragma once
 
 #include "qtcommon.h"
-#include <QMainWindow>
+#include "host/host.h"
+#include "defs.h"
 #include <QPlainTextEdit>
 #include <QComboBox>
 #include <QSettings>
-#include "host/host.h"
 
 namespace Ui
 {
@@ -21,42 +20,32 @@ public:
 	explicit MainWindow(QWidget *parent = nullptr);
 	~MainWindow();
 
-signals:
-	void SigAddProcess(unsigned int processId);
-	void SigRemoveProcess(unsigned int processId);
-	void SigAddThread(TextThread* thread);
-	void SigRemoveThread(TextThread* thread);
-	void SigThreadOutput(TextThread* thread, QString output);
-
 private slots:
-	void AddProcess(unsigned int processId);
-	void RemoveProcess(unsigned int processId);
-	void AddThread(TextThread* thread);
-	void RemoveThread(TextThread* thread);
-	void ThreadOutput(TextThread* thread, QString output);
 	void on_attachButton_clicked();
 	void on_detachButton_clicked();
-	void on_ttCombo_activated(int index);
-	void on_unhookButton_clicked();
 	void on_hookButton_clicked();
 	void on_saveButton_clicked();
-	void on_addExtenButton_clicked();
-	void on_rmvExtenButton_clicked();
+	void on_setButton_clicked();
+	void on_extenButton_clicked();
+	void on_ttCombo_activated(int index);
 
 private:
+	void closeEvent(QCloseEvent*);
+	void InvokeOnMainThread(std::function<void()> f);
+	void ProcessConnected(DWORD processId);
+	void ProcessDisconnected(DWORD processId);
+	void ThreadAdded(TextThread* thread);
+	void ThreadRemoved(TextThread* thread);
+	bool SentenceReceived(TextThread* thread, std::wstring& sentence);
 	QString TextThreadString(TextThread* thread);
-	ThreadParam ParseTextThreadString(QString textThreadString);
+	ThreadParam ParseTextThreadString(QString ttString);
 	DWORD GetSelectedProcessId();
-	void ReloadExtensions();
-	std::unordered_map<std::string, int64_t> GetInfoForExtensions(TextThread* thread);
-	QVector<HookParam> GetAllHooks(DWORD processId);
+	std::unordered_map<std::string, int64_t> GetMiscInfo(TextThread* thread);
 
 	Ui::MainWindow* ui;
-	QSettings settings = QSettings("Textractor.ini", QSettings::IniFormat);
+	QSettings settings = QSettings(CONFIG_FILE, QSettings::IniFormat);
 	QComboBox* processCombo;
 	QComboBox* ttCombo;
-	QComboBox* extenCombo;
 	QPlainTextEdit* textOutput;
+	QWidget* extenWindow;
 };
-
-#endif // MAINWINDOW_H

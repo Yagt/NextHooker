@@ -11,6 +11,7 @@
 #include "engine/match.h"
 #include "util/util.h"
 #include "main.h"
+#include "texthook.h"
 #include "engine/mono/funcinfo.h"
 #include "engine/ppsspp/funcinfo.h"
 #include "ithsys/ithsys.h"
@@ -2123,20 +2124,20 @@ bool InsertBGIHook()
 bool InsertBaldrHook()
 {
 	const BYTE ins[] = { 0x90,0xff,0x50,0x3c,0x83,0xc4,0x20,0x8b,0x45,0xec };
-	DWORD addr = Util::SearchMemory(ins, sizeof(ins));
-	if (!addr) {
-		ConsoleOutput("Textractor: BALDR failed: could not find instructions");
-		return false;
+	for (auto addr : Util::SearchMemory(ins, sizeof(ins)))
+	{
+		HookParam hp = {};
+		hp.address = addr;
+		hp.offset = 4;
+		hp.type = NO_CONTEXT | USING_STRING | USING_UNICODE; // 0x403
+		ConsoleOutput("Textractor: INSERT BALDR");
+		NewHook(hp, "BALDR");
+
+		return true;
 	}
 
-	HookParam hp = {};
-	hp.address = addr;
-	hp.offset = 4;
-	hp.type = NO_CONTEXT | USING_STRING | USING_UNICODE; // 0x403
-	ConsoleOutput("Textractor: INSERT BALDR");
-	NewHook(hp, "BALDR");
-
-	return true;
+	ConsoleOutput("Textractor: BALDR failed: could not find instructions");
+	return false;
 }
 
 /********************************************************************************************
@@ -2232,7 +2233,7 @@ void InsertRealliveHook()
   //ConsoleOutput("Probably Reallive. Wait for text.");
   ConsoleOutput("vnreng: TRIGGER Reallive");
   trigger_fun_ = InsertRealliveDynamicHook;
-  SwitchTrigger(true);
+  SetTrigger();
 }
 
 namespace { // unnamed
@@ -4266,6 +4267,8 @@ bool InsertCMVS2Hook()
   enum { addr_offset = 3 }; // offset from the beginning of the function
   ULONG range = min(processStopAddress - processStartAddress, MAX_REL_ADDR);
   ULONG addr = MemDbg::findBytes(bytes, sizeof(bytes), processStartAddress, processStartAddress + range);
+  // Artikash 11/9/2018: Not sure, but isn't findCallerAddress a better way to do this?
+  if (!addr) addr = MemDbg::findCallerAddressAfterInt3((DWORD)GetGlyphOutlineA, processStartAddress, processStopAddress);
   if (!addr) {
     ConsoleOutput("vnreng:CMVS2: pattern not found");
     return false;
@@ -5764,7 +5767,8 @@ int GetShinaRioVersion()
     //char *buffer,*version;//,*ptr;
     enum { BufferSize = 0x40 };
     char buffer[BufferSize];
-    ReadFile(hFile, buffer, BufferSize, (DWORD*)buffer, nullptr);
+	DWORD DUMMY;
+    ReadFile(hFile, buffer, BufferSize, &DUMMY, nullptr);
     CloseHandle(hFile);
     if (buffer[0] == '[') {
       buffer[0x3f] = 0; // jichi 8/24/2013: prevent strstr from overflow
@@ -5783,7 +5787,7 @@ bool InsertShinaHook()
 {
   int ver = GetShinaRioVersion();
   if (ver >= 50) {
-	  SwitchTrigger(true);
+	  SetTrigger();
 	  trigger_fun_ = StackSearchingTrigger<GetGlyphOutlineA, NULL>;
 	  ConsoleOutput("Textractor: ShinaRio 2.50+: adding trigger");
 	  return true;
@@ -5958,7 +5962,7 @@ void InsertWaffleHook()
     }
   //ConsoleOutput("Probably Waffle. Wait for text.");
   trigger_fun_ = InsertWaffleDynamicHook;
-  SwitchTrigger(true);
+  SetTrigger();
   //ConsoleOutput("vnreng:WAFFLE: failed");
 }
 
@@ -8501,7 +8505,7 @@ bool InsertSystemAoiDynamic()
   ConsoleOutput("vnreng: DYNAMIC SystemAoi");
   //ConsoleOutput("Probably SoftHouseChara. Wait for text.");
   trigger_fun_ = InsertSystemAoiDynamicHook;
-  SwitchTrigger(true);
+  SetTrigger();
   return true;
 }
 
@@ -8741,9 +8745,10 @@ struct TextListElement // ecx, this structure saved a list of element
 
   bool isValid() const
   {
-    return flag1 == 0 && flag2 == 0 && flag3 == 0 && flag4 == 0
-        && size > 0 && size < capacity
-        && !::IsBadReadPtr(text, capacity) && size == ::strlen(text);
+	  // Artikash 11/18/2018: I'm not sure why those checks were ever there, but they prevented this hook from working on RJ232953
+    return /*flag1 == 0 && flag2 == 0 && flag3 == 0 && flag4 == 0
+        && */size > 0 && size < capacity
+        && !::IsBadReadPtr(text, capacity) /*&& size == ::strlen(text)*/;
         //&& (quint8)*text > 127;
   }
 };
@@ -8816,7 +8821,7 @@ void InsertIronGameSystemHook()
 {
   //ConsoleOutput("Probably IronGameSystem. Wait for text.");
   trigger_fun_ = InsertIGSDynamicHook;
-  SwitchTrigger(true);
+  SetTrigger();
   ConsoleOutput("vnreng: TRIGGER IronGameSystem");
 }
 
@@ -8871,7 +8876,7 @@ void SpecialHookAB2Try(DWORD esp_base, HookParam *, BYTE, DWORD *data, DWORD *sp
 BOOL FindCharacteristInstruction()
 {
 	const BYTE bytes[] = { 0x0F, 0xB7, 0x44, 0x50, 0x0C, 0x89 };
-	if (DWORD addr = Util::SearchMemory(bytes, sizeof(bytes), PAGE_EXECUTE_READWRITE))
+	for (auto addr : Util::SearchMemory(bytes, sizeof(bytes), PAGE_EXECUTE_READWRITE))
 	{
 		//GROWL_DWORD(addr);
 		HookParam hp = {};
@@ -9321,6 +9326,7 @@ bool InsertWillPlusWHook()
 */
 static bool InsertNewWillPlusHook()
 {
+	bool found = false;
 	const BYTE characteristicInstructions[] = 
 	{ 
 		0xc2, 0x08, 0, // ret 0008; Seems to always be ret 8 before the hookable function. not sure why, not sure if stable.
@@ -9333,10 +9339,11 @@ static bool InsertNewWillPlusHook()
 		0x81, 0xec, XX4, // sub esp,?
 		0xa1, XX4, // mov eax,[?]
 		0x33, 0xc5, // xor eax,ebp
-		0x89, 0x45, 0xec // mov [ebp-14],eax; not sure if 0x14 is stable
+		//0x89, 0x45, 0xec // mov [ebp-14],eax; not sure if 0x14 is stable
 	};
-	if (DWORD addr = Util::SearchMemory(characteristicInstructions, sizeof(characteristicInstructions)))
+	for (auto addr : Util::SearchMemory(characteristicInstructions, sizeof(characteristicInstructions)))
 	{
+		//GROWL_DWORD(addr);
 		HookParam hp = {};
 		hp.address = addr + 3;
 		hp.type = USING_STRING | USING_UNICODE | DATA_INDIRECT;
@@ -9344,10 +9351,10 @@ static bool InsertNewWillPlusHook()
 		hp.index = 0;
 		ConsoleOutput("Textractor: INSERT New WillPlus (ADVHD) hook");
 		NewHook(hp, "WillPlus2");
-		return true;
+		found = true;
 	}
-	ConsoleOutput("New WillPlus: failed to find instructions");
-	return false;
+	if (!found) ConsoleOutput("New WillPlus: failed to find instructions");
+	return found;
 }
 
 } // unnamed namespace
@@ -9450,7 +9457,7 @@ void InsertRyokuchaHook()
 {
   //ConsoleOutput("Probably Ryokucha. Wait for text.");
   trigger_fun_ = InsertRyokuchaDynamicHook;
-  SwitchTrigger(true);
+  SetTrigger();
   ConsoleOutput("vnreng: TRIGGER Ryokucha");
 }
 
@@ -11329,24 +11336,22 @@ bool InsertScenarioPlayerHook()
   }
 
   HookParam hp = {};
-  //hp.address = addr;
+  hp.address = addr;
   hp.length_offset = 1;
   hp.offset = 4;
-  //if (addr - start == addr_offset_W) {
-  // Artikash 8/18/2018: can't figure out how to tell apart which hook is needed, so just insert both xD
+  if (addr - start == addr_offset_W) {
+  // Artikash 8/18/2018: can't figure out how to tell apart which hook is needed, so alert user
   // (The method used to tell the hooks apart previously fails on https://vndb.org/v19713)
-  HookParam hp2 = hp;
 
   hp.type = USING_UNICODE;
-  hp.address = addr;
   ConsoleOutput("vnreng: INSERT ScenarioPlayerW");
   NewHook(hp, "ScenarioPlayerW");
-  //} else {
-  hp2.type = BIG_ENDIAN; // 4
-  hp2.address = addr + 5;
+  } else {
+  hp.type = BIG_ENDIAN; // 4
   ConsoleOutput("vnreng: INSERT ScenarioPlayerA");
-  NewHook(hp2, "ScenarioPlayerA");
-  //}
+  NewHook(hp, "ScenarioPlayerA");
+  }
+  ConsoleOutput("Text encoding might be wrong: try changing it if this hook finds garbage!");
   return true;
 }
 
@@ -11440,7 +11445,7 @@ bool InsertMarineHeartHook()
     0x6a, 0x00,                 // 0040d1e3  |. 6a 00              push 0x0                        ; |width = 0x0 0x8b,0x46, 0x04,
     0x8b,0x46, 0x04,            // 0040d1e5  |. 8b46 04            mov eax,dword ptr ds:[esi+0x4]  ; |
     0x50,                       // 0040d1e8  |. 50                 push eax                        ; |height
-    0xe8, 0x00,0xfa,0x06,0x00   // 0040d1e9  |. e8 00fa0600        call <jmp.&gdi32.CreateFontA>   ; \createfonta
+    0xe8//, 0x00,0xfa,0x06,0x00   // 0040d1e9  |. e8 00fa0600        call <jmp.&gdi32.CreateFontA>   ; \createfonta
   };
   enum { addr_offset = 0x0040d160 - 0x0040d1c6 }; // distance to the beginning of the function
   ULONG range = min(processStopAddress - processStartAddress, MAX_REL_ADDR);
@@ -13525,6 +13530,171 @@ bool InsertExpHook()
  *  http://www.hongfire.com/forum/showthread.php/36807-AGTH-text-extraction-tool-for-games-translation/page753
  *  /HA-4@552B5:姉小路直子と銀色の死�exe
  *  If this hook no longer works, try that one instead.
+
+
+ * Artikash 10/14/2018: Old HorkEye hook can't be found in shukusei no girlfriend https://vndb.org/v22880
+ * This function can be used instead
+ 00FABC30 - 83 EC 34              - sub esp,34 { 52 }
+00FABC33 - A1 F4701701           - mov eax,[011770F4] { [9E005B76] }
+00FABC38 - 33 C4                 - xor eax,esp
+00FABC3A - 89 44 24 30           - mov [esp+30],eax
+00FABC3E - 83 3D C4541701 00     - cmp dword ptr [011754C4],00 { 0 }
+00FABC45 - 0F84 C8010000         - je 00FABE13
+00FABC4B - 83 3D 0CBF7F01 00     - cmp dword ptr [017FBF0C],00 { 0 }
+00FABC52 - 66 A1 DCD00F01        - mov ax,[010FD0DC] { [00003264] }
+00FABC58 - F3 0F7E 05 D4D00F01   - movq xmm0,[010FD0D4] { ["lookahead2"] }
+00FABC60 - 66 A3 C0B97F01        - mov [017FB9C0],ax { [00545000] }
+00FABC66 - A0 DED00F01           - mov al,[010FD0DE] { [0] }
+00FABC6B - A2 C2B97F01           - mov [017FB9C2],al { [84] }
+00FABC70 - A1 E0D00F01           - mov eax,[010FD0E0] { ["vo/000/"] }
+00FABC75 - 66 0FD6 05 B8B97F01   - movq [017FB9B8],xmm0 { [00006669] }
+00FABC7D - 0F57 C0               - xorps xmm0,xmm0
+00FABC80 - 89 44 24 10           - mov [esp+10],eax
+00FABC84 - A1 E4D00F01           - mov eax,[010FD0E4] { [002F3030] }
+00FABC89 - 89 44 24 14           - mov [esp+14],eax
+00FABC8D - 0F11 44 24 18         - movups [esp+18],xmm0
+00FABC92 - 66 0FD6 44 24 28      - movq [esp+28],xmm0
+00FABC98 - 74 0B                 - je 00FABCA5
+00FABC9A - A1 9CE27F01           - mov eax,[017FE29C] { [0EC90D98] }
+00FABC9F - 8B 00                 - mov eax,[eax]
+00FABCA1 - 8B 00                 - mov eax,[eax]
+00FABCA3 - EB 05                 - jmp 00FABCAA
+00FABCA5 - A1 F8BE7F01           - mov eax,[017FBEF8] { [00000640] }
+00FABCAA - 40                    - inc eax
+00FABCAB - 55                    - push ebp
+00FABCAC - 8B 2D 00602801        - mov ebp,[01286000] { [00D07890] }
+00FABCB2 - 89 44 24 04           - mov [esp+04],eax
+00FABCB6 - B8 ABAAAA2A           - mov eax,2AAAAAAB { 715827883 }
+00FABCBB - 8B 4D 1C              - mov ecx,[ebp+1C]
+00FABCBE - 2B 4D 18              - sub ecx,[ebp+18]
+00FABCC1 - F7 E9                 - imul ecx
+00FABCC3 - D1 FA                 - sar edx,1
+00FABCC5 - 8B C2                 - mov eax,edx
+00FABCC7 - C1 E8 1F              - shr eax,1F { 31 }
+00FABCCA - 03 C2                 - add eax,edx
+00FABCCC - 8B 54 24 04           - mov edx,[esp+04]
+00FABCD0 - 89 44 24 10           - mov [esp+10],eax
+00FABCD4 - 3B D0                 - cmp edx,eax
+00FABCD6 - 0F83 36010000         - jae 00FABE12
+00FABCDC - 53                    - push ebx
+00FABCDD - 8D 0C 52              - lea ecx,[edx+edx*2]
+00FABCE0 - C1 E1 02              - shl ecx,02 { 2 }
+00FABCE3 - 56                    - push esi
+00FABCE4 - 89 4C 24 10           - mov [esp+10],ecx
+00FABCE8 - 57                    - push edi
+00FABCE9 - 0F1F 80 00000000      - nop [eax+00000000]
+00FABCF0 - 8B 45 18              - mov eax,[ebp+18]
+00FABCF3 - 8B 3C 01              - mov edi,[ecx+eax]
+00FABCF6 - 8B 4F 14              - mov ecx,[edi+14] ; Hook here - edi currently is char** to text
+00FABCF9 - 83 F9 10              - cmp ecx,10 { 16 }
+00FABCFC - 72 04                 - jb 00FABD02
+00FABCFE - 8B 07                 - mov eax,[edi]
+00FABD00 - EB 02                 - jmp 00FABD04
+00FABD02 - 8B C7                 - mov eax,edi
+00FABD04 - 8A 10                 - mov dl,[eax]
+00FABD06 - 0FB6 C2               - movzx eax,dl
+00FABD09 - 80 B8 20FA0F01 00     - cmp byte ptr [eax+010FFA20],00 { 0 }
+00FABD10 - 0F85 AD000000         - jne 00FABDC3
+00FABD16 - 80 B8 20041001 00     - cmp byte ptr [eax+01100420],00 { 0 }
+00FABD1D - 0F85 A0000000         - jne 00FABDC3
+00FABD23 - 80 FA 81              - cmp dl,-7F { 129 }
+00FABD26 - 0F85 E3000000         - jne 00FABE0F
+00FABD2C - 83 F9 10              - cmp ecx,10 { 16 }
+00FABD2F - 72 04                 - jb 00FABD35
+00FABD31 - 8B 07                 - mov eax,[edi]
+00FABD33 - EB 02                 - jmp 00FABD37
+00FABD35 - 8B C7                 - mov eax,edi
+00FABD37 - 80 78 01 79           - cmp byte ptr [eax+01],79 { 121 }
+00FABD3B - 0F85 CE000000         - jne 00FABE0F
+00FABD41 - 8B 47 10              - mov eax,[edi+10]
+00FABD44 - 33 DB                 - xor ebx,ebx
+00FABD46 - 89 44 24 18           - mov [esp+18],eax
+00FABD4A - 8D 73 02              - lea esi,[ebx+02]
+00FABD4D - 3B C6                 - cmp eax,esi
+00FABD4F - 76 72                 - jna 00FABDC3
+00FABD51 - 8B E8                 - mov ebp,eax
+00FABD53 - 8B 57 14              - mov edx,[edi+14]
+00FABD56 - 83 FA 10              - cmp edx,10 { 16 }
+00FABD59 - 72 04                 - jb 00FABD5F
+00FABD5B - 8B 07                 - mov eax,[edi]
+00FABD5D - EB 02                 - jmp 00FABD61
+00FABD5F - 8B C7                 - mov eax,edi
+00FABD61 - 8A 0C 30              - mov cl,[eax+esi]
+00FABD64 - 0FB6 C1               - movzx eax,cl
+00FABD67 - 80 B8 20FF0F01 00     - cmp byte ptr [eax+010FFF20],00 { 0 }
+00FABD6E - 74 1A                 - je 00FABD8A
+00FABD70 - 80 F9 81              - cmp cl,-7F { 129 }
+00FABD73 - 75 12                 - jne 00FABD87
+00FABD75 - 83 FA 10              - cmp edx,10 { 16 }
+00FABD78 - 72 04                 - jb 00FABD7E
+00FABD7A - 8B 07                 - mov eax,[edi]
+00FABD7C - EB 02                 - jmp 00FABD80
+00FABD7E - 8B C7                 - mov eax,edi
+00FABD80 - 80 7C 30 01 7A        - cmp byte ptr [eax+esi+01],7A { 122 }
+00FABD85 - 74 32                 - je 00FABDB9
+00FABD87 - 46                    - inc esi
+00FABD88 - EB 28                 - jmp 00FABDB2
+00FABD8A - 80 F9 2C              - cmp cl,2C { 44 }
+00FABD8D - 75 23                 - jne 00FABDB2
+00FABD8F - 85 DB                 - test ebx,ebx
+00FABD91 - 74 1C                 - je 00FABDAF
+00FABD93 - 8B C6                 - mov eax,esi
+00FABD95 - 8B CF                 - mov ecx,edi
+00FABD97 - 2B C3                 - sub eax,ebx
+00FABD99 - 50                    - push eax
+00FABD9A - E8 C1DFFAFF           - call 00F59D60
+00FABD9F - 03 C3                 - add eax,ebx
+00FABDA1 - 50                    - push eax
+00FABDA2 - 8D 44 24 28           - lea eax,[esp+28]
+00FABDA6 - 50                    - push eax
+00FABDA7 - E8 F4BB0100           - call 00FC79A0
+00FABDAC - 83 C4 0C              - add esp,0C { 12 }
+00FABDAF - 8D 5E 01              - lea ebx,[esi+01]
+00FABDB2 - 46                    - inc esi
+00FABDB3 - 3B F5                 - cmp esi,ebp
+00FABDB5 - 72 9C                 - jb 00FABD53
+00FABDB7 - EB 04                 - jmp 00FABDBD
+00FABDB9 - 85 DB                 - test ebx,ebx
+00FABDBB - 75 37                 - jne 00FABDF4
+00FABDBD - 8B 2D 00602801        - mov ebp,[01286000] { [00D07890] }
+00FABDC3 - 8B 54 24 10           - mov edx,[esp+10]
+00FABDC7 - 8B 4C 24 14           - mov ecx,[esp+14]
+00FABDCB - 42                    - inc edx
+00FABDCC - 83 C1 0C              - add ecx,0C { 12 }
+00FABDCF - 89 54 24 10           - mov [esp+10],edx
+00FABDD3 - 89 4C 24 14           - mov [esp+14],ecx
+00FABDD7 - 3B 54 24 1C           - cmp edx,[esp+1C]
+00FABDDB - 0F82 0FFFFFFF         - jb 00FABCF0
+00FABDE1 - 5F                    - pop edi
+00FABDE2 - 5E                    - pop esi
+00FABDE3 - 5B                    - pop ebx
+00FABDE4 - 5D                    - pop ebp
+00FABDE5 - 8B 4C 24 30           - mov ecx,[esp+30]
+00FABDE9 - 33 CC                 - xor ecx,esp
+00FABDEB - E8 16C61000           - call 010B8406
+00FABDF0 - 83 C4 34              - add esp,34 { 52 }
+00FABDF3 - C3                    - ret
+00FABDF4 - 83 FA 10              - cmp edx,10 { 16 }
+00FABDF7 - 72 02                 - jb 00FABDFB
+00FABDF9 - 8B 3F                 - mov edi,[edi]
+00FABDFB - 2B F3                 - sub esi,ebx
+00FABDFD - 8D 04 1F              - lea eax,[edi+ebx]
+00FABE00 - 56                    - push esi
+00FABE01 - 50                    - push eax
+00FABE02 - 8D 44 24 28           - lea eax,[esp+28]
+00FABE06 - 50                    - push eax
+00FABE07 - E8 94BB0100           - call 00FC79A0
+00FABE0C - 83 C4 0C              - add esp,0C { 12 }
+00FABE0F - 5F                    - pop edi
+00FABE10 - 5E                    - pop esi
+00FABE11 - 5B                    - pop ebx
+00FABE12 - 5D                    - pop ebp
+00FABE13 - 8B 4C 24 30           - mov ecx,[esp+30]
+00FABE17 - 33 CC                 - xor ecx,esp
+00FABE19 - E8 E8C51000           - call 010B8406
+00FABE1E - 83 C4 34              - add esp,34 { 52 }
+00FABE21 - C3                    - ret
+
  */
 // Skip text between "," and "�, and remove [n]
 // ex:【夏偾,S005_B_0002】「バーッ�ク
@@ -13561,20 +13731,39 @@ bool InsertHorkEyeHook()
     0x8a,0x0c,0x1a          // 013cdb0d   8a0c1a           mov cl,byte ptr ds:[edx+ebx]        jichi: here
   };
   enum { addr_offset = sizeof(bytes) - 3 }; // 8a0c1a
-  ULONG addr = MemDbg::findBytes(bytes, sizeof(bytes), processStartAddress, processStopAddress);
-  if (!addr) {
-    ConsoleOutput("vnreng:HorkEye: pattern not found");
-    return false;
+  ;
+  if (ULONG addr = MemDbg::findBytes(bytes, sizeof(bytes), processStartAddress, processStopAddress)) {
+	  HookParam hp = {};
+	  hp.address = addr + addr_offset;
+	  hp.offset = pusha_ebx_off - 4;
+	  hp.type = USING_STRING | NO_CONTEXT | FIXING_SPLIT; // floating address
+	  hp.filter_fun = HorkEyeFilter;
+	  ConsoleOutput("vnreng: INSERT HorkEye");
+	  NewHook(hp, "HorkEye");
+	  return true;
   }
 
-  HookParam hp = {};
-  hp.address = addr + addr_offset;
-  hp.offset = pusha_ebx_off -4;
-  hp.type = USING_STRING|NO_CONTEXT|FIXING_SPLIT; // floating address
-  hp.filter_fun = HorkEyeFilter;
-  ConsoleOutput("vnreng: INSERT HorkEye");
-  NewHook(hp, "HorkEye");
-  return true;
+  const BYTE bytes2[] =
+  {
+	  0x8b, 0x45, 0x18,
+	  0x8b, 0x3c, 0x01
+  };
+
+  if (DWORD addr = MemDbg::findBytes(bytes2, sizeof(bytes2), processStartAddress, processStopAddress))
+  {
+	  HookParam hp = {};
+	  hp.address = addr + 6;
+	  hp.offset = pusha_edi_off - 4;
+	  hp.type = USING_STRING | DATA_INDIRECT;
+	  hp.index = 0;
+	  ConsoleOutput("Textractor: INSERT HorkEye2");
+	  NewHook(hp, "HorkEye2");
+	  return true;
+  }
+
+  ConsoleOutput("vnreng:HorkEye: pattern not found");
+  return false;
+  
 }
 
 /** jichi 12/2/2014 5pb
@@ -16447,6 +16636,89 @@ bool InsertRenpyHook()
 	return true;
 }
 
+
+/**
+ *  jichi 4/21/2014: Mono (Unity3D)
+ *  See (ok123): http://sakuradite.com/topic/214
+ *  Pattern: 33DB66390175
+ *
+ *  FIXME: This approach won't work before mono is loaded into the memory.
+ *
+ *  Example: /HWN-8*0:3C@ mono.dll search 33DB66390175
+ *  - length_offset: 1
+ *  - module: 1690566707 = 0x64c40033
+ *  - off: 4294967284 = 0xfffffff4 = -0xc
+ *  - split: 60 = 0x3c
+ *  - type: 1114 = 0x45a
+ *
+ *  Function starts:
+ *  1003b818  /$ 55             push ebp
+ *  1003b819  |. 8bec           mov ebp,esp
+ *  1003b81b  |. 51             push ecx
+ *  1003b81c  |. 807d 10 00     cmp byte ptr ss:[ebp+0x10],0x0
+ *  1003b820  |. 8b50 08        mov edx,dword ptr ds:[eax+0x8]
+ *  1003b823  |. 53             push ebx
+ *  1003b824  |. 8b5d 08        mov ebx,dword ptr ss:[ebp+0x8]
+ *  1003b827  |. 56             push esi
+ *  1003b828  |. 8b75 0c        mov esi,dword ptr ss:[ebp+0xc]
+ *  1003b82b  |. 57             push edi
+ *  1003b82c  |. 8d78 0c        lea edi,dword ptr ds:[eax+0xc]
+ *  1003b82f  |. 897d 08        mov dword ptr ss:[ebp+0x8],edi
+ *  1003b832  |. 74 44          je short mono.1003b878
+ *  1003b834  |. 2bf2           sub esi,edx
+ *  1003b836  |. 03f1           add esi,ecx
+ *  1003b838  |. 894d 10        mov dword ptr ss:[ebp+0x10],ecx
+ *  1003b83b  |. 8975 08        mov dword ptr ss:[ebp+0x8],esi
+ *  1003b83e  |. 3bce           cmp ecx,esi
+ *  1003b840  |. 7f 67          jg short mono.1003b8a9
+ *  1003b842  |. 8d4c4b 0c      lea ecx,dword ptr ds:[ebx+ecx*2+0xc]
+ *  1003b846  |> 0fb707         /movzx eax,word ptr ds:[edi]
+ *  1003b849  |. 33db           |xor ebx,ebx    ; jichi hook here
+ *  1003b84b  |. 66:3901        |cmp word ptr ds:[ecx],ax
+ *  1003b84e  |. 75 16          |jnz short mono.1003b866
+ *  1003b850  |. 8bf1           |mov esi,ecx
+ *  1003b852  |> 43             |/inc ebx
+ *  1003b853  |. 83c6 02        ||add esi,0x2
+ *  1003b856  |. 3bda           ||cmp ebx,edx
+ *  1003b858  |. 74 19          ||je short mono.1003b873
+ *  1003b85a  |. 66:8b06        ||mov ax,word ptr ds:[esi]
+ *  1003b85d  |. 66:3b045f      ||cmp ax,word ptr ds:[edi+ebx*2]
+ *  1003b861  |.^74 ef          |\je short mono.1003b852
+ *  1003b863  |. 8b75 08        |mov esi,dword ptr ss:[ebp+0x8]
+ *  1003b866  |> ff45 10        |inc dword ptr ss:[ebp+0x10]
+ *  1003b869  |. 83c1 02        |add ecx,0x2
+ *  1003b86c  |. 3975 10        |cmp dword ptr ss:[ebp+0x10],esi
+ *  1003b86f  |.^7e d5          \jle short mono.1003b846
+ */
+bool InsertMonoHook()
+{
+
+	// Instruction pattern: 90FF503C83C4208B45EC
+	const BYTE ins[] = {
+	  0x33,0xdb,      // 1003b849  |. 33db           |xor ebx,ebx    ; jichi hook here
+	  0x66,0x39,0x01, // 1003b84b  |. 66:3901        |cmp word ptr ds:[ecx],ax
+	  0x75 //,0x16    // 1003b84e  |. 75 16          |jnz short mono.1003b866
+	};
+	bool found = false;
+	for (auto addr : Util::SearchMemory(ins, sizeof(ins)/*,PAGE_EXECUTE_READWRITE*/))
+	{
+		HookParam hp = {};
+		hp.address = addr;
+		//hp.module = module;
+		hp.length_offset = 1;
+		hp.offset = -0xc;
+		hp.split = 0x3c;
+		//hp.type = NO_CONTEXT|USING_SPLIT|MODULE_OFFSET|USING_UNICODE|DATA_INDIRECT; // 0x45a;
+		hp.type = NO_CONTEXT | USING_SPLIT | USING_UNICODE | DATA_INDIRECT;
+
+		ConsoleOutput("vnreng: INSERT Mono");
+		NewHook(hp, "Mono");
+		found = true;
+	}
+	if (!found) ConsoleOutput("vnreng:Mono: pattern not found");
+	return found;
+}
+
 /** jichi 12/26/2014 Mono
  *  Sample game: [141226] ハ�レ�めいと
  */
@@ -16484,7 +16756,8 @@ bool InsertMonoHooks()
   if (!h)
     return false;
 
-  InsertBaldrHook(); //Artikash 8/28/2018: insert for all mono games: maybe itll work for more than baldr sky zero?
+  InsertBaldrHook(); // Artikash 8/28/2018: insert for all mono games: maybe itll work for more than baldr sky zero?
+  InsertMonoHook(); // Artikash 10/20/2018: dunno why this was removed, works for some stuff so readd
   bool ret = false;
 
   // mono_unichar2* mono_string_to_utf16       (MonoString *s);
@@ -21425,114 +21698,5 @@ bool InsertAlchemist3PSPHook()
 
   ConsoleOutput("vnreng: Alchemist3 PSP: leave");
   return addr;
-}
-#endif // 0
-
-
-#if 0 // jichi 4/21/2014: Disabled as this does not work before mono.dll is loaded
-
-static HMODULE WaitForModuleReady(const char *name, int retryCount = 100, int sleepInterval = 100) // retry for 10 seconds
-{
-  for (int i = 0; i < retryCount; i++) {
-    if (HMODULE h = ::GetModuleHandleA(name))
-      return h;
-    ::Sleep(sleepInterval);
-  }
-  return nullptr;
-}
-
-/**
- *  jichi 4/21/2014: Mono (Unity3D)
- *  See (ok123): http://sakuradite.com/topic/214
- *  Pattern: 33DB66390175
- *
- *  FIXME: This approach won't work before mono is loaded into the memory.
- *
- *  Example: /HWN-8*0:3C@ mono.dll search 33DB66390175
- *  - length_offset: 1
- *  - module: 1690566707 = 0x64c40033
- *  - off: 4294967284 = 0xfffffff4 = -0xc
- *  - split: 60 = 0x3c
- *  - type: 1114 = 0x45a
- *
- *  Function starts:
- *  1003b818  /$ 55             push ebp
- *  1003b819  |. 8bec           mov ebp,esp
- *  1003b81b  |. 51             push ecx
- *  1003b81c  |. 807d 10 00     cmp byte ptr ss:[ebp+0x10],0x0
- *  1003b820  |. 8b50 08        mov edx,dword ptr ds:[eax+0x8]
- *  1003b823  |. 53             push ebx
- *  1003b824  |. 8b5d 08        mov ebx,dword ptr ss:[ebp+0x8]
- *  1003b827  |. 56             push esi
- *  1003b828  |. 8b75 0c        mov esi,dword ptr ss:[ebp+0xc]
- *  1003b82b  |. 57             push edi
- *  1003b82c  |. 8d78 0c        lea edi,dword ptr ds:[eax+0xc]
- *  1003b82f  |. 897d 08        mov dword ptr ss:[ebp+0x8],edi
- *  1003b832  |. 74 44          je short mono.1003b878
- *  1003b834  |. 2bf2           sub esi,edx
- *  1003b836  |. 03f1           add esi,ecx
- *  1003b838  |. 894d 10        mov dword ptr ss:[ebp+0x10],ecx
- *  1003b83b  |. 8975 08        mov dword ptr ss:[ebp+0x8],esi
- *  1003b83e  |. 3bce           cmp ecx,esi
- *  1003b840  |. 7f 67          jg short mono.1003b8a9
- *  1003b842  |. 8d4c4b 0c      lea ecx,dword ptr ds:[ebx+ecx*2+0xc]
- *  1003b846  |> 0fb707         /movzx eax,word ptr ds:[edi]
- *  1003b849  |. 33db           |xor ebx,ebx    ; jichi hook here
- *  1003b84b  |. 66:3901        |cmp word ptr ds:[ecx],ax
- *  1003b84e  |. 75 16          |jnz short mono.1003b866
- *  1003b850  |. 8bf1           |mov esi,ecx
- *  1003b852  |> 43             |/inc ebx
- *  1003b853  |. 83c6 02        ||add esi,0x2
- *  1003b856  |. 3bda           ||cmp ebx,edx
- *  1003b858  |. 74 19          ||je short mono.1003b873
- *  1003b85a  |. 66:8b06        ||mov ax,word ptr ds:[esi]
- *  1003b85d  |. 66:3b045f      ||cmp ax,word ptr ds:[edi+ebx*2]
- *  1003b861  |.^74 ef          |\je short mono.1003b852
- *  1003b863  |. 8b75 08        |mov esi,dword ptr ss:[ebp+0x8]
- *  1003b866  |> ff45 10        |inc dword ptr ss:[ebp+0x10]
- *  1003b869  |. 83c1 02        |add ecx,0x2
- *  1003b86c  |. 3975 10        |cmp dword ptr ss:[ebp+0x10],esi
- *  1003b86f  |.^7e d5          \jle short mono.1003b846
- */
-bool InsertMonoHook()
-{
-  enum { module = 0x64c40033 }; // hash of "mono.dll"
-  DWORD base = Util::FindModuleBase(module);
-  if (!base && WaitForModuleReady("mono.dll"))
-    base = Util::FindModuleBase(module);
-
-  if (!base) {
-    ConsoleOutput("vnreng:Mono: module not found");
-    return false;
-  }
-
-  // Instruction pattern: 90FF503C83C4208B45EC
-  const BYTE ins[] = {
-    0x33,0xdb,      // 1003b849  |. 33db           |xor ebx,ebx    ; jichi hook here
-    0x66,0x39,0x01, // 1003b84b  |. 66:3901        |cmp word ptr ds:[ecx],ax
-    0x75 //,0x16    // 1003b84e  |. 75 16          |jnz short mono.1003b866
-  };
-  enum { addr_offset = 0 }; // no offset
-  enum { range = 0x50000 }; // larger than relative addresses = 0x3b849
-  ULONG reladdr = SearchPattern(base, range, ins, sizeof(ins));
-  //reladdr = 0x3b849;
-  GROWL(reladdr);
-  if (!reladdr) {
-    ConsoleOutput("vnreng:Mono: pattern not found");
-    return false;
-  }
-
-  HookParam hp = {};
-  hp.address = base + reladdr + addr_offset;
-  //hp.module = module;
-  hp.length_offset = 1;
-  hp.offset = -0xc;
-  hp.split = 0x3c;
-  //hp.type = NO_CONTEXT|USING_SPLIT|MODULE_OFFSET|USING_UNICODE|DATA_INDIRECT; // 0x45a;
-  hp.type = NO_CONTEXT|USING_SPLIT|USING_UNICODE|DATA_INDIRECT;
-
-  ConsoleOutput("vnreng: INSERT Mono");
-  NewHook(hp, "Mono");
-  return true;
 }
 #endif // 0
