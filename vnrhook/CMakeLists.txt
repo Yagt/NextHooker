@@ -17,8 +17,9 @@ set(vnrhook_src
   util/ithsys/ithsys.cc
   util/disasm/disasm.cc
   util/memdbg/memsearch.cc
-  host/host.cc
-  host/textthread.cc
+  host/host.cpp
+  host/textthread.cpp
+  host/util.cpp
 )
 endif()
 

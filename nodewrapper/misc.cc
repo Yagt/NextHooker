@@ -10,6 +10,22 @@ DWORD Hash(std::wstring module)
 	return hash;
 }
 
+void SplitWstring(const std::wstring& s, std::vector<std::wstring>& v, const std::wstring& c)
+{
+	std::wstring::size_type pos1, pos2;
+	pos2 = s.find(c);
+	pos1 = 0;
+	while (std::wstring::npos != pos2)
+	{
+		v.push_back(s.substr(pos1, pos2 - pos1));
+
+		pos1 = pos2 + c.size();
+		pos2 = s.find(c, pos1);
+	}
+	if (pos1 != s.length())
+		v.push_back(s.substr(pos1));
+}
+
 std::wstring GenerateHCodeWstring(HookParam hp, DWORD processId)
 {
 	std::wstringstream wss;
@@ -89,6 +105,18 @@ std::wstring GenerateHCodeWstring(HookParam hp, DWORD processId)
 			std::wstringstream().swap(wss);
 		}
 	}
+
+	// Attempt to make the address relative
+	if (!(hp.type & MODULE_OFFSET))
+		if (AutoHandle<> process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, processId))
+			if (MEMORY_BASIC_INFORMATION info = {}; VirtualQueryEx(process, (LPCVOID)hp.address, &info, sizeof(info)))
+				if (auto moduleName = Util::GetModuleFileName(processId, (HMODULE)info.AllocationBase))
+				{
+					hp.type |= MODULE_OFFSET;
+					hp.address -= (uint64_t)info.AllocationBase;
+					wcscpy_s<MAX_MODULE_SIZE>(hp.module, moduleName->c_str() + moduleName->rfind(L'\\') + 1);
+				}
+
 	code.append(L"@");
 	wss << std::hex << hp.address;
 	std::wstring badCode = code + wss.str();
@@ -96,18 +124,11 @@ std::wstring GenerateHCodeWstring(HookParam hp, DWORD processId)
 	for (std::wstring::iterator it = badCode.begin(); it != badCode.end(); ++it)
 		*it = towupper(*it);
 
-	HANDLE processHandle;
-	if (!(processHandle = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, processId))) return badCode;
-	MEMORY_BASIC_INFORMATION info;
-	if (!VirtualQueryEx(processHandle, (LPCVOID)hp.address, &info, sizeof(info))) return badCode;
-	wchar_t buffer[MAX_PATH];
-	if (!GetModuleFileNameExW(processHandle, (HMODULE)info.AllocationBase, buffer, MAX_PATH)) return badCode;
+	if (hp.type & MODULE_OFFSET) code.append(L":").append(hp.module);
+	wchar_t wsFunction[120];
+	swprintf(wsFunction, 120, L"%hs", hp.function);
+	if (hp.type & FUNCTION_OFFSET) code.append(L":").append(std::wstring(wsFunction));
 
-	wss << std::hex << hp.address - (DWORD)info.AllocationBase;
-	code.append(wss.str() + L":");
-	for (std::wstring::iterator it = code.begin(); it != code.end(); ++it)
-		*it = towupper(*it);
-	code.append(wcsrchr(buffer, L'\\') + 1);
 	return code;
 }
 
@@ -157,6 +178,16 @@ HookParam ParseHCodeWstring(std::wstring HCode)
 
 	std::wstringstream wss;
 	std::wsmatch wsm;
+	
+	std::wregex codepage(L"^([0-9]+)#");
+	std::regex_search(HCode.cbegin(), HCode.cend(), wsm, codepage);
+	if (wsm.size() != 0)
+	{
+		wss << std::hex << wsm[1].str();
+		wss >> hp.codepage;
+		std::wstringstream().swap(wss);
+		HCode.erase(0, wsm[0].str().length());
+	}
 
 	std::wregex dataOffset(L"\\-?[\\dA-F]+");
 	std::regex_search(HCode.cbegin(), HCode.cend(), wsm, dataOffset);
@@ -199,25 +230,34 @@ HookParam ParseHCodeWstring(std::wstring HCode)
 		}
 	}
 
-	if (HCode.length() < 1 || HCode[0] != L'@') return {};
-	HCode.erase(0, 1);
 
-	std::wregex address(L"^([\\dA-F]+):?");
-	std::regex_search(HCode.cbegin(), HCode.cend(), wsm, address);
+	std::vector<std::wstring> addressPieces;
+	SplitWstring(HCode, addressPieces, std::wstring(L":"));
+
+	std::wregex address(L"^@([\\dA-F]+)$");
+	std::regex_search(addressPieces[0].cbegin(), addressPieces[0].cend(), wsm, address);
 	if (wsm.size() == 0) return {};
 	wss << std::hex << wsm[1].str();
 	wss >> hp.address;
 	std::wstringstream().swap(wss);
-	HCode.erase(0, wsm[0].str().length());
 
-	if (HCode.length())
+	if (addressPieces.size() > 1)
 	{
 		hp.type |= MODULE_OFFSET;
-		hp.module = Hash(HCode);
+		wcscpy_s<MAX_MODULE_SIZE>(hp.module, addressPieces[1].c_str());
 	}
-	if (hp.offset & 0x80000000)
-		hp.offset -= 4;
-	if (hp.split & 0x80000000)
-		hp.split -= 4;
+
+	if (addressPieces.size() > 2)
+	{
+		hp.type |= FUNCTION_OFFSET;
+		std::string sFunction;
+		for (char x : addressPieces[2])
+			sFunction += x;
+		strcpy_s<MAX_MODULE_SIZE>(hp.function, sFunction.c_str());
+	}
+
+	if (hp.offset < 0) hp.offset -= 4;
+	if (hp.split < 0) hp.split -= 4;
+
 	return hp;
 }

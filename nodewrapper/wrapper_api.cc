@@ -31,14 +31,15 @@ v8::Local<v8::Object> TextThreadToV8Object(TextThread *thread)
 	v8::Local<v8::Object> obj = Nan::New<v8::Object>();
 
 	obj->Set(Nan::New("num").ToLocalChecked(), Nan::New(static_cast<double>(thread->handle)));
-	obj->Set(Nan::New("pid").ToLocalChecked(), Nan::New(static_cast<uint32_t>(tp.pid)));
-	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New(static_cast<double>(tp.hook)));
-	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New(static_cast<double>(tp.retn)));
-	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New(static_cast<double>(tp.spl)));
-	std::string sName = _converter.to_bytes(Host::GetHookName(tp.pid, tp.hook));
-	obj->Set(Nan::New("name").ToLocalChecked(), Nan::New(sName).ToLocalChecked());
+	obj->Set(Nan::New("pid").ToLocalChecked(), Nan::New(static_cast<uint32_t>(tp.processId)));
+	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New(static_cast<double>(tp.addr)));
+	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New(static_cast<double>(tp.ctx)));
+	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New(static_cast<double>(tp.ctx2)));
+	obj->Set(Nan::New("name").ToLocalChecked(), Nan::New(_converter.to_bytes(
+		thread->name))
+		.ToLocalChecked());
 	obj->Set(Nan::New("hcode").ToLocalChecked(), Nan::New(_converter.to_bytes(
-		GenerateHCodeWstring(Host::GetHookParam(tp.pid, tp.hook), tp.pid)))
+		GenerateHCodeWstring(Host::GetHookParam(tp), tp.processId)))
 		.ToLocalChecked());
 
 	return obj;
@@ -51,10 +52,10 @@ v8::Local<v8::Object> RemovedTextThreadToV8Object(TextThread *thread)
 	v8::Local<v8::Object> obj = Nan::New<v8::Object>();
 
 	obj->Set(Nan::New("num").ToLocalChecked(), Nan::New(static_cast<double>(thread->handle)));
-	obj->Set(Nan::New("pid").ToLocalChecked(), Nan::New(static_cast<uint32_t>(tp.pid)));
-	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New(static_cast<double>(tp.hook)));
-	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New(static_cast<double>(tp.retn)));
-	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New(static_cast<double>(tp.spl)));
+	obj->Set(Nan::New("pid").ToLocalChecked(), Nan::New(static_cast<uint32_t>(tp.processId)));
+	obj->Set(Nan::New("hook").ToLocalChecked(), Nan::New(static_cast<double>(tp.addr)));
+	obj->Set(Nan::New("retn").ToLocalChecked(), Nan::New(static_cast<double>(tp.ctx)));
+	obj->Set(Nan::New("spl").ToLocalChecked(), Nan::New(static_cast<double>(tp.ctx2)));
 
 	return obj;
 }
@@ -222,18 +223,6 @@ NAN_METHOD(NodeWrapper::Start)
 		_callbackInfos.push(newInfo);
 		_callbackMutex.unlock();
 		uv_async_send(&_async);
-
-		thread->RegisterOutputCallBack([&](TextThread* threadOut, std::wstring output) {
-			CallbackInfo *newInfo = new CallbackInfo;
-			newInfo->type = CallbackType::THREAD_OUTPUT;
-			newInfo->tt = threadOut;
-			newInfo->output = output;
-			_callbackMutex.lock();
-			_callbackInfos.push(newInfo);
-			_callbackMutex.unlock();
-			uv_async_send(&_async);
-			return output;
-		});
 	}, 
 	[&](TextThread* thread) {
 		CallbackInfo *newInfo = new CallbackInfo;
@@ -243,6 +232,17 @@ NAN_METHOD(NodeWrapper::Start)
 		_callbackInfos.push(newInfo);
 		_callbackMutex.unlock();
 		uv_async_send(&_async);
+	},
+	[&](TextThread* threadOut, std::wstring &output) {
+		CallbackInfo *newInfo = new CallbackInfo;
+		newInfo->type = CallbackType::THREAD_OUTPUT;
+		newInfo->tt = threadOut;
+		newInfo->output = output;
+		_callbackMutex.lock();
+		_callbackInfos.push(newInfo);
+		_callbackMutex.unlock();
+		uv_async_send(&_async);
+		return true;
 	});
 }
 
@@ -282,15 +282,4 @@ NAN_METHOD(NodeWrapper::InsertHook)
 		info.GetIsolate()->ThrowException(v8::Exception::Error(Nan::New("invalid /H code").ToLocalChecked()));
 	}
 	Host::InsertHook(pid, toInsert);
-}
-
-NAN_METHOD(NodeWrapper::RemoveHook)
-{
-	Nan::HandleScope scope;
-	if (!info[0]->IsUint32() || !info[1]->IsUint32()) {
-		info.GetIsolate()->ThrowException(v8::Exception::TypeError(Nan::New("Wrong arguments").ToLocalChecked()));
-	}
-	int pid = info[0]->IntegerValue();
-	int addr = info[1]->IntegerValue();
-	Host::RemoveHook(pid, addr);
 }

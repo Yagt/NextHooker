@@ -1,4 +1,3 @@
-#include <nan.h>
 #include "nodewrapper/wrapper_api.h"
 
 using v8::FunctionTemplate;
@@ -26,8 +25,6 @@ NAN_MODULE_INIT(InitAll) {
 		GetFunction(New<FunctionTemplate>(NodeWrapper::DetachProcess)).ToLocalChecked());
 	Set(target, New<String>("insertHook").ToLocalChecked(),
 		GetFunction(New<FunctionTemplate>(NodeWrapper::InsertHook)).ToLocalChecked());
-	Set(target, New<String>("removeHook").ToLocalChecked(),
-		GetFunction(New<FunctionTemplate>(NodeWrapper::RemoveHook)).ToLocalChecked());
 }
 
 NODE_MODULE(addon, InitAll)

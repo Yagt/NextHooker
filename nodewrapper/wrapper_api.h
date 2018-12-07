@@ -14,7 +14,6 @@ namespace NodeWrapper
 	NAN_METHOD(InjectProcess);
 	NAN_METHOD(DetachProcess);
 	NAN_METHOD(InsertHook);
-	NAN_METHOD(RemoveHook);
 }
 
 #endif

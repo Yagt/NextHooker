@@ -8,11 +8,13 @@
 		'nodewrapper/misc.cc'
       ],
       'libraries': [
-		'<(module_root_dir)/Builds/x86-Debug/Build/vnrhook'
+		'<(module_root_dir)/Builds/Debug/x86/vnrhook'
       ],
       'include_dirs': [
-        "<!(node -e \"require('nan')\")"
+        "<!(node -e \"require('nan')\")",
+		"<(module_root_dir)/include/"
       ],
+	  "defines": [ "_UNICODE", "UNICODE" ],
       'configurations': {
         'Debug': {
           'msvs_settings': {

@@ -2,6 +2,8 @@
 
 #include "../include/const.h"
 #include "../vnrhook/host/host.h"
+#include "../vnrhook/host/util.h"
+
 #include <Psapi.h>
 
 #include <string>

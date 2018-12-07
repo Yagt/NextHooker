@@ -1,46 +1,41 @@
 #pragma once
 
-// textthread.h
-// 8/23/2013 jichi
-// Branch: ITH/TextThread.h, rev 120
-
-#include "../include/common.h"
-#include "../include/types.h"
+#include "common.h"
+#include "types.h"
 
 class TextThread
 {
-	typedef std::function<std::wstring(TextThread*, std::wstring)> ThreadOutputCallback;
 public:
-	TextThread(ThreadParam tp, DWORD status);
+	using EventCallback = std::function<void(TextThread*)>;
+	using OutputCallback = std::function<bool(TextThread*, std::wstring&)>;
+	inline static EventCallback OnCreate, OnDestroy;
+	inline static OutputCallback Output;
+
+	inline static int flushDelay = 400; // flush every 400ms by default
+	inline static int maxBufferSize = 1000;
+	inline static int defaultCodepage = SHIFT_JIS;
+	inline static int threadCounter = 0;
+
+	TextThread(ThreadParam tp, HookParam hp, std::optional<std::wstring> name = {});
 	~TextThread();
 
-	std::wstring GetStore();
-	void AddText(const BYTE* data, int len);
+	std::wstring GetStorage();
 	void AddSentence(std::wstring sentence);
-
-	void RegisterOutputCallBack(ThreadOutputCallback cb) { Output = cb; }
+	void Push(const BYTE* data, int len);
+	friend void CALLBACK Flush(void* thread, BOOLEAN);
 
 	const int64_t handle;
 	const std::wstring name;
 	const ThreadParam tp;
-
-	inline static int FlushDelay = 250; // flush every 250ms by default
-	inline static int MaxBufferSize = 500; 
-	inline static int ThreadCounter = 0;
+	const HookParam hp;
 
 private:
-	void Flush();
+	struct TimerDeleter { void operator()(void* h) { DeleteTimerQueueTimer(NULL, h, INVALID_HANDLE_VALUE); } };
 
-	std::vector<char> buffer;
-	std::wstring storage;
-	std::recursive_mutex ttMutex;
-
-	HANDLE deletionEvent = CreateEventW(nullptr, FALSE, FALSE, NULL);
-	std::thread flushThread = std::thread([&] { while (WaitForSingleObject(deletionEvent, 10) == WAIT_TIMEOUT) Flush(); });
-	DWORD timestamp = GetTickCount();
-
-	ThreadOutputCallback Output;
-	DWORD status;
+	ThreadSafePtr<std::wstring> storage;
+	std::wstring buffer;
+	std::unordered_set<wchar_t> repeatingChars;
+	std::mutex bufferMutex;
+	DWORD lastPushTime;
+	AutoHandle<TimerDeleter> timer = NULL; // this needs to be last so it's destructed first
 };
-
-// EOF
