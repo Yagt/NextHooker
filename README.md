@@ -1,4 +1,12 @@
-# Textractor Node.js Addon
+# DEPRECATED - Textractor Node.js Addon
+
+**Due to various troubles on binding and compiling from upstream, this project has been deprecated and no longer supported.**
+
+**[Textractor](https://github.com/Artikash/Textractor) has released a CLI version, please refer to [node-textractor](https://github.com/tinyAdapter/node-textractor) to get the same functionalities.**
+
+---
+
+**Below is the original README, if you MUST use this project, use at your own risk.**
 
 ## Overview
 
